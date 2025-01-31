@@ -24,7 +24,7 @@
     id: 'favoriteJsonEditor.preview',
     name: 'Preview',
     category: 'Favorite JSON editor',
-    keyText: 'F5 | Ctrl+Enter',
+    keyText: 'F5 | CtrlOrCommand+Enter',
     testEnabled: () => getCurrentEditor() != null,
     onClick: () => getCurrentEditor().preview(),
   });
@@ -38,22 +38,22 @@
   import AceEditor from '../query/AceEditor.svelte';
   import useEditorData from '../query/useEditorData';
   import invalidateCommands from '../commands/invalidateCommands';
-  import axiosInstance from '../utility/axiosInstance';
   import { showModal } from '../modals/modalTools';
   import ErrorMessageModal from '../modals/ErrorMessageModal.svelte';
   import { openFavorite } from '../appobj/FavoriteFileAppObject.svelte';
   import createActivator, { getActiveComponent } from '../utility/createActivator';
+  import { apiCall } from '../utility/api';
 
   export let tabid;
   export let savedFile;
 
-  const tabVisible: any = getContext('tabVisible');
+  const tabFocused: any = getContext('tabFocused');
 
   export const activator = createActivator('FavoriteEditorTab', false);
 
   let domEditor;
 
-  $: if ($tabVisible && domEditor) {
+  $: if ($tabFocused && domEditor) {
     domEditor?.getEditor()?.focus();
   }
 
@@ -97,7 +97,7 @@
   export function save() {
     try {
       const data = JSON.parse(getData());
-      axiosInstance.post('files/save', {
+      apiCall('files/save', {
         file: savedFile,
         folder: 'favorites',
         format: 'json',

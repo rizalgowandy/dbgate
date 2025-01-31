@@ -1,5 +1,5 @@
 <script lang="ts">
-  import FormStyledButton from '../elements/FormStyledButton.svelte';
+  import FormStyledButton from '../buttons/FormStyledButton.svelte';
 
   import FormProvider from '../forms/FormProvider.svelte';
   import FormSubmit from '../forms/FormSubmit.svelte';
@@ -25,11 +25,11 @@
       {header}
     </svelte:fragment>
 
-    <FormTextField {label} name="value" focused />
+    <FormTextField {label} name="value" focused data-testid="InputTextModal_value" />
 
     <svelte:fragment slot="footer">
-      <FormSubmit value="OK" on:click={e => handleSubmit(e.detail)} />
-      <FormStyledButton type="button" value="Cancel" on:click={closeCurrentModal} />
+      <FormSubmit value="OK" on:click={e => handleSubmit(e.detail)} data-testid="InputTextModal_ok" />
+      <FormStyledButton type="button" value="Cancel" on:click={closeCurrentModal} data-testid="InputTextModal_cancel" />
     </svelte:fragment>
   </ModalBase>
 </FormProvider>

@@ -1,5 +1,5 @@
 import _ from 'lodash';
-import { SqlDumper } from 'dbgate-types';
+import type { SqlDumper } from 'dbgate-types';
 import { Expression, ColumnRefExpression } from './types';
 import { dumpSqlSourceRef } from './dumpSqlSource';
 
@@ -28,9 +28,22 @@ export function dumpSqlExpression(dmp: SqlDumper, expr: Expression) {
       dmp.put('%s', expr.sql);
       break;
 
+    case 'unaryRaw':
+      if (expr.beforeSql) dmp.putRaw(expr.beforeSql);
+      dumpSqlExpression(dmp, expr.expr);
+      if (expr.afterSql) dmp.putRaw(expr.afterSql);
+      break;
+
     case 'call':
       dmp.put('%s(', expr.func);
       if (expr.argsPrefix) dmp.put('%s ', expr.argsPrefix);
+      dmp.putCollection(',', expr.args, x => dumpSqlExpression(dmp, x));
+      dmp.put(')');
+      break;
+
+    case 'methodCall':
+      dumpSqlExpression(dmp, expr.thisObject);
+      dmp.put('.%s(', expr.method);
       dmp.putCollection(',', expr.args, x => dumpSqlExpression(dmp, x));
       dmp.put(')');
       break;
@@ -40,12 +53,12 @@ export function dumpSqlExpression(dmp: SqlDumper, expr: Expression) {
       break;
 
     case 'rowNumber':
-      dmp.put(" ^row_number() ^over (^order ^by ");
+      dmp.put(' ^row_number() ^over (^order ^by ');
       dmp.putCollection(', ', expr.orderBy, x => {
         dumpSqlExpression(dmp, x);
         dmp.put(' %k', x.direction);
       });
-      dmp.put(")");
+      dmp.put(')');
       break;
   }
 }

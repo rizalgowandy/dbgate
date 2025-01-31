@@ -1,9 +1,11 @@
 <script lang="ts" context="module">
-  const dbgateEnv = {
-    axios: axiosInstance,
-  };
-
   async function loadPlugins(pluginsDict, installedPlugins) {
+    window['DBGATE_PACKAGES'] = {
+      'dbgate-tools': dbgateTools,
+      'dbgate-sqltree': sqlTree,
+    };
+
+    // neccessary for older plugins
     window['DBGATE_TOOLS'] = dbgateTools;
 
     const newPlugins = {};
@@ -14,17 +16,12 @@
           loaded: false,
           loadingPackageName: installed.name,
         });
-        const resp = await axiosInstance.request({
-          method: 'get',
-          url: 'plugins/script',
-          params: {
-            packageName: installed.name,
-          },
+        const resp = await apiCall('plugins/script', {
+          packageName: installed.name,
         });
-        const module = eval(`${resp.data}; plugin`);
+        const module = eval(`${resp}; plugin`);
         console.log('Loaded plugin', module);
         const moduleContent = module.__esModule ? module.default : module;
-        if (moduleContent.initialize) moduleContent.initialize(dbgateEnv);
         newPlugins[installed.name] = moduleContent;
       }
     }
@@ -45,27 +42,32 @@
     return res;
   }
 
+  function filterByEdition(arr) {
+    return arr.filter(x => !x.premiumOnly || isProApp());
+  }
+
   export function buildExtensions(plugins) {
     const extensions = {
       plugins,
-      fileFormats: buildFileFormats(plugins),
-      themes: buildThemes(plugins),
-      drivers: buildDrivers(plugins),
-      quickExports: buildQuickExports(plugins),
+      fileFormats: filterByEdition(buildFileFormats(plugins)),
+      themes: filterByEdition(buildThemes(plugins)),
+      drivers: filterByEdition(buildDrivers(plugins)),
+      quickExports: filterByEdition(buildQuickExports(plugins)),
     };
     return extensions;
   }
-
 </script>
 
 <script lang="ts">
   import _ from 'lodash';
   import { extensions, loadingPluginStore } from '../stores';
-  import axiosInstance from '../utility/axiosInstance';
   import { useInstalledPlugins } from '../utility/metadataLoaders';
   import { buildFileFormats, buildQuickExports } from './fileformats';
   import { buildThemes } from './themes';
-  import dbgateTools from 'dbgate-tools';
+  import * as dbgateTools from 'dbgate-tools';
+  import * as sqlTree from 'dbgate-sqltree';
+  import { apiCall } from '../utility/api';
+  import { isProApp } from '../utility/proTools';
 
   let pluginsDict = {};
   const installedPlugins = useInstalledPlugins();
@@ -87,5 +89,4 @@
     .filter(x => x.content);
 
   $: $extensions = buildExtensions(plugins);
-
 </script>

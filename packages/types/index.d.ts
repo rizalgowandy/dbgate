@@ -11,6 +11,7 @@ export interface OpenedDatabaseConnection {
   status?: {
     name: string;
     message?: string;
+    counter: number;
   };
 }
 
@@ -18,6 +19,8 @@ export interface OpenedSession {
   sesid: string;
   conid: string;
   database: string;
+  killOnDone?: boolean;
+  loadingReader_jslid: string;
   subprocess: ChildProcess;
 }
 
@@ -43,3 +46,5 @@ export * from './dumper';
 export * from './dbtypes';
 export * from './extensions';
 export * from './alter-processor';
+export * from './appdefs';
+export * from './filter-type';

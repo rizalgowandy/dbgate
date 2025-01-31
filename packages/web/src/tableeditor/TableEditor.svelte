@@ -1,60 +1,60 @@
 <script lang="ts" context="module">
   const getCurrentEditor = () => getActiveComponent('TableEditor');
 
-  // registerCommand({
-  //   id: 'tableEditor.addColumn',
-  //   category: 'Table editor',
-  //   name: 'Add column',
-  //   icon: 'icon add-column',
-  //   toolbar: true,
-  //   isRelatedToTab: true,
-  //   testEnabled: () => getCurrentEditor()?.writable(),
-  //   onClick: () => getCurrentEditor().addColumn(),
-  // });
+  registerCommand({
+    id: 'tableEditor.addColumn',
+    category: 'Table editor',
+    name: 'Add column',
+    icon: 'icon add-column',
+    toolbar: true,
+    isRelatedToTab: true,
+    testEnabled: () => getCurrentEditor()?.getIsWritable(),
+    onClick: () => getCurrentEditor().addColumn(),
+  });
 
-  // registerCommand({
-  //   id: 'tableEditor.addPrimaryKey',
-  //   category: 'Table editor',
-  //   name: 'Add primary key',
-  //   icon: 'icon add-key',
-  //   toolbar: true,
-  //   isRelatedToTab: true,
-  //   testEnabled: () => getCurrentEditor()?.allowAddPrimaryKey(),
-  //   onClick: () => getCurrentEditor().addPrimaryKey(),
-  // });
+  registerCommand({
+    id: 'tableEditor.addPrimaryKey',
+    category: 'Table editor',
+    name: 'Add primary key',
+    icon: 'icon add-key',
+    toolbar: true,
+    isRelatedToTab: true,
+    testEnabled: () => getCurrentEditor()?.allowAddPrimaryKey(),
+    onClick: () => getCurrentEditor().addPrimaryKey(),
+  });
 
-  // registerCommand({
-  //   id: 'tableEditor.addForeignKey',
-  //   category: 'Table editor',
-  //   name: 'Add foreign key',
-  //   icon: 'icon add-key',
-  //   toolbar: true,
-  //   isRelatedToTab: true,
-  //   testEnabled: () => getCurrentEditor()?.writable(),
-  //   onClick: () => getCurrentEditor().addForeignKey(),
-  // });
+  registerCommand({
+    id: 'tableEditor.addForeignKey',
+    category: 'Table editor',
+    name: 'Add foreign key',
+    icon: 'icon add-key',
+    toolbar: true,
+    isRelatedToTab: true,
+    testEnabled: () => getCurrentEditor()?.getIsWritable() && !getCurrentEditor()?.getDialect()?.omitForeignKeys,
+    onClick: () => getCurrentEditor().addForeignKey(),
+  });
 
-  // registerCommand({
-  //   id: 'tableEditor.addIndex',
-  //   category: 'Table editor',
-  //   name: 'Add index',
-  //   icon: 'icon add-key',
-  //   toolbar: true,
-  //   isRelatedToTab: true,
-  //   testEnabled: () => getCurrentEditor()?.writable(),
-  //   onClick: () => getCurrentEditor().addIndex(),
-  // });
+  registerCommand({
+    id: 'tableEditor.addIndex',
+    category: 'Table editor',
+    name: 'Add index',
+    icon: 'icon add-key',
+    toolbar: true,
+    isRelatedToTab: true,
+    testEnabled: () => getCurrentEditor()?.getIsWritable() && !getCurrentEditor()?.getDialect()?.omitIndexes,
+    onClick: () => getCurrentEditor().addIndex(),
+  });
 
-  // registerCommand({
-  //   id: 'tableEditor.addUnique',
-  //   category: 'Table editor',
-  //   name: 'Add unique',
-  //   icon: 'icon add-key',
-  //   toolbar: true,
-  //   isRelatedToTab: true,
-  //   testEnabled: () => getCurrentEditor()?.writable(),
-  //   onClick: () => getCurrentEditor().addUnique(),
-  // });
+  registerCommand({
+    id: 'tableEditor.addUnique',
+    category: 'Table editor',
+    name: 'Add unique',
+    icon: 'icon add-key',
+    toolbar: true,
+    isRelatedToTab: true,
+    testEnabled: () => getCurrentEditor()?.getIsWritable() && !getCurrentEditor()?.getDialect()?.omitUniqueConstraints,
+    onClick: () => getCurrentEditor().addUnique(),
+  });
 </script>
 
 <script lang="ts">
@@ -81,21 +81,34 @@
   import IndexEditorModal from './IndexEditorModal.svelte';
   import PrimaryKeyEditorModal from './PrimaryKeyEditorModal.svelte';
   import UniqueEditorModal from './UniqueEditorModal.svelte';
+  import ObjectFieldsEditor from '../elements/ObjectFieldsEditor.svelte';
+  import PrimaryKeyLikeListControl from './PrimaryKeyLikeListControl.svelte';
 
   export const activator = createActivator('TableEditor', true);
 
   export let tableInfo;
   export let setTableInfo;
   export let dbInfo;
+  export let driver;
+  export let resetCounter;
+  export let isCreateTable;
+  export let schemaList;
 
-  export function writable() {
-    return !!setTableInfo;
+  $: isWritable = !!setTableInfo;
+
+  export function getIsWritable() {
+    return isWritable;
+  }
+
+  export function getDialect() {
+    return driver?.dialect;
   }
 
   export function addColumn() {
     showModal(ColumnEditorModal, {
       setTableInfo,
       tableInfo,
+      driver,
       onAddNext: async () => {
         await tick();
         addColumn();
@@ -103,14 +116,15 @@
     });
   }
 
-  // export function allowAddPrimaryKey() {
-  //   return writable() && !tableInfo?.primaryKey;
-  // }
+  export function allowAddPrimaryKey() {
+    return isWritable && !tableInfo?.primaryKey;
+  }
 
   export function addPrimaryKey() {
     showModal(PrimaryKeyEditorModal, {
       setTableInfo,
       tableInfo,
+      driver,
     });
   }
 
@@ -127,6 +141,7 @@
       setTableInfo,
       tableInfo,
       dbInfo,
+      driver,
     });
   }
 
@@ -139,7 +154,6 @@
   }
 
   $: columns = tableInfo?.columns;
-  $: primaryKey = tableInfo?.primaryKey;
   $: foreignKeys = tableInfo?.foreignKeys;
   $: dependencies = tableInfo?.dependencies;
   $: indexes = tableInfo?.indexes;
@@ -149,20 +163,39 @@
     tableInfo;
     invalidateCommands();
   }
+
+  $: tableFormOptions = driver?.dialect?.getTableFormOptions?.(tableInfo?.objectId ? 'editTableForm' : 'newTableForm');
 </script>
 
 <div class="wrapper">
+  {#if tableInfo && (tableFormOptions || isCreateTable)}
+    {#key resetCounter}
+      <ObjectFieldsEditor
+        title="Table properties"
+        fieldDefinitions={tableFormOptions ?? []}
+        pureNameTitle={isCreateTable ? 'Table name' : null}
+        schemaList={isCreateTable && schemaList?.length >= 0 ? schemaList : null}
+        values={_.pick(tableInfo, ['schemaName', 'pureName', ...(tableFormOptions ?? []).map(x => x.name)])}
+        onChangeValues={vals => {
+          if (!_.isEmpty(vals) && setTableInfo) {
+            setTableInfo(tbl => ({ ...tbl, ...vals }));
+          }
+        }}
+      />
+    {/key}
+  {/if}
+
   <ObjectListControl
     collection={columns?.map((x, index) => ({ ...x, ordinal: index + 1 }))}
     title={`Columns (${columns?.length || 0})`}
     emptyMessage="No columns defined"
-    clickable={writable()}
-    on:clickrow={e => showModal(ColumnEditorModal, { columnInfo: e.detail, tableInfo, setTableInfo })}
-    onAddNew={writable() ? addColumn : null}
+    clickable
+    on:clickrow={e => showModal(ColumnEditorModal, { columnInfo: e.detail, tableInfo, setTableInfo, driver })}
+    onAddNew={isWritable ? addColumn : null}
     columns={[
-      {
+      !driver?.dialect?.specificNullabilityImplementation && {
         fieldName: 'notNull',
-        header: 'Not NULL',
+        header: 'Nullability',
         sortable: true,
         slot: 0,
       },
@@ -176,7 +209,7 @@
         header: 'Default value',
         sortable: true,
       },
-      {
+      driver?.dialect?.columnProperties?.isSparse && {
         fieldName: 'isSparse',
         header: 'Is Sparse',
         sortable: true,
@@ -187,22 +220,38 @@
         header: 'Computed Expression',
         sortable: true,
       },
-      {
+      driver?.dialect?.columnProperties?.isPersisted && {
         fieldName: 'isPersisted',
         header: 'Is Persisted',
         sortable: true,
         slot: 2,
       },
-      writable()
+      driver?.dialect?.columnProperties?.isUnsigned && {
+        fieldName: 'isUnsigned',
+        header: 'Unsigned',
+        sortable: true,
+        slot: 4,
+      },
+      driver?.dialect?.columnProperties?.isZerofill && {
+        fieldName: 'isZerofill',
+        header: 'Zero fill',
+        sortable: true,
+        slot: 5,
+      },
+      driver?.dialect?.columnProperties?.columnComment && {
+        fieldName: 'columnComment',
+        header: 'Comment',
+        sortable: true,
+      },
+      isWritable
         ? {
             fieldName: 'actions',
-            sortable: true,
             slot: 3,
           }
         : null,
     ]}
   >
-    <svelte:fragment slot="0" let:row>{row?.notNull ? 'YES' : 'NO'}</svelte:fragment>
+    <svelte:fragment slot="0" let:row>{row?.notNull ? 'NOT NULL' : 'NULL'}</svelte:fragment>
     <svelte:fragment slot="1" let:row>{row?.isSparse ? 'YES' : 'NO'}</svelte:fragment>
     <svelte:fragment slot="2" let:row>{row?.isPersisted ? 'YES' : 'NO'}</svelte:fragment>
     <svelte:fragment slot="3" let:row
@@ -213,121 +262,116 @@
         }}>Remove</Link
       ></svelte:fragment
     >
+    <svelte:fragment slot="4" let:row>{row?.isUnsigned ? 'YES' : 'NO'}</svelte:fragment>
+    <svelte:fragment slot="5" let:row>{row?.isZerofill ? 'YES' : 'NO'}</svelte:fragment>
     <svelte:fragment slot="name" let:row><ColumnLabel {...row} forceIcon /></svelte:fragment>
   </ObjectListControl>
 
-  <ObjectListControl
-    collection={_.compact([primaryKey])}
-    title="Primary key"
-    emptyMessage={writable() ? 'No primary key defined' : null}
-    onAddNew={writable() && !primaryKey && columns?.length > 0 ? addPrimaryKey : null}
-    clickable={writable()}
-    on:clickrow={e => showModal(PrimaryKeyEditorModal, { constraintInfo: e.detail, tableInfo, setTableInfo })}
-    columns={[
-      {
-        fieldName: 'columns',
-        header: 'Columns',
-        slot: 0,
-      },
-      writable()
-        ? {
-            fieldName: 'actions',
-            sortable: true,
-            slot: 1,
-          }
-        : null,
-    ]}
-  >
-    <svelte:fragment slot="name" let:row><ConstraintLabel {...row} /></svelte:fragment>
-    <svelte:fragment slot="0" let:row>{row?.columns.map(x => x.columnName).join(', ')}</svelte:fragment>
-    <svelte:fragment slot="1" let:row
-      ><Link
-        onClick={e => {
-          e.stopPropagation();
-          setTableInfo(tbl => editorDeleteConstraint(tbl, row));
-        }}>Remove</Link
-      ></svelte:fragment
-    >
-  </ObjectListControl>
+  <PrimaryKeyLikeListControl {tableInfo} {setTableInfo} {isWritable} {driver} />
 
-  <ObjectListControl
-    collection={indexes}
-    onAddNew={writable() && columns?.length > 0 ? addIndex : null}
-    title={`Indexes (${indexes?.length || 0})`}
-    emptyMessage={writable() ? 'No index defined' : null}
-    clickable={writable()}
-    on:clickrow={e => showModal(UniqueEditorModal, { constraintInfo: e.detail, tableInfo, setTableInfo })}
-    columns={[
-      {
-        fieldName: 'columns',
-        header: 'Columns',
-        slot: 0,
-      },
-      writable()
-        ? {
-            fieldName: 'actions',
-            sortable: true,
-            slot: 1,
-          }
-        : null,
-    ]}
-  >
-    <svelte:fragment slot="name" let:row><ConstraintLabel {...row} /></svelte:fragment>
-    <svelte:fragment slot="0" let:row>{row?.columns.map(x => x.columnName).join(', ')}</svelte:fragment>
-    <svelte:fragment slot="1" let:row
-      ><Link
-        onClick={e => {
-          e.stopPropagation();
-          setTableInfo(tbl => editorDeleteConstraint(tbl, row));
-        }}>Remove</Link
-      ></svelte:fragment
-    >
-  </ObjectListControl>
+  {#if driver?.dialect?.sortingKeys}
+    <PrimaryKeyLikeListControl
+      {tableInfo}
+      {setTableInfo}
+      {isWritable}
+      {driver}
+      constraintLabel="sorting key"
+      constraintType="sortingKey"
+    />
+  {/if}
 
-  <ObjectListControl
-    collection={uniques}
-    onAddNew={writable() && columns?.length > 0 ? addUnique : null}
-    title={`Unique constraints (${uniques?.length || 0})`}
-    emptyMessage={writable() ? 'No unique defined' : null}
-    clickable={writable()}
-    on:clickrow={e => showModal(IndexEditorModal, { constraintInfo: e.detail, tableInfo, setTableInfo })}
-    columns={[
-      {
-        fieldName: 'columns',
-        header: 'Columns',
-        slot: 0,
-      },
-      writable()
-        ? {
-            fieldName: 'actions',
-            sortable: true,
-            slot: 1,
-          }
-        : null,
-    ]}
-  >
-    <svelte:fragment slot="name" let:row><ConstraintLabel {...row} /></svelte:fragment>
-    <svelte:fragment slot="0" let:row>{row?.columns.map(x => x.columnName).join(', ')}</svelte:fragment>
-    <svelte:fragment slot="1" let:row
-      ><Link
-        onClick={e => {
-          e.stopPropagation();
-          setTableInfo(tbl => editorDeleteConstraint(tbl, row));
-        }}>Remove</Link
-      ></svelte:fragment
+  {#if !driver?.dialect?.omitIndexes}
+    <ObjectListControl
+      collection={indexes}
+      onAddNew={isWritable && columns?.length > 0 ? addIndex : null}
+      title={`Indexes (${indexes?.length || 0})`}
+      emptyMessage={isWritable ? 'No index defined' : null}
+      clickable
+      on:clickrow={e => showModal(IndexEditorModal, { constraintInfo: e.detail, tableInfo, setTableInfo, driver })}
+      columns={[
+        {
+          fieldName: 'columns',
+          header: 'Columns',
+          slot: 0,
+          sortable: true,
+        },
+        {
+          fieldName: 'unique',
+          header: 'Unique',
+          slot: 1,
+          sortable: true,
+        },
+        isWritable
+          ? {
+              fieldName: 'actions',
+              slot: 2,
+            }
+          : null,
+      ]}
     >
-  </ObjectListControl>
+      <svelte:fragment slot="name" let:row><ConstraintLabel {...row} /></svelte:fragment>
+      <svelte:fragment slot="0" let:row>{row?.columns.map(x => x.columnName).join(', ')}</svelte:fragment>
+      <svelte:fragment slot="1" let:row>{row?.isUnique ? 'YES' : 'NO'}</svelte:fragment>
+      <svelte:fragment slot="2" let:row
+        ><Link
+          onClick={e => {
+            e.stopPropagation();
+            setTableInfo(tbl => editorDeleteConstraint(tbl, row));
+          }}>Remove</Link
+        ></svelte:fragment
+      >
+    </ObjectListControl>
+  {/if}
 
-  <ForeignKeyObjectListControl
-    collection={foreignKeys}
-    onAddNew={writable() && columns?.length > 0 ? addForeignKey : null}
-    title={`Foreign keys (${foreignKeys?.length || 0})`}
-    emptyMessage={writable() ? 'No foreign key defined' : null}
-    clickable={writable()}
-    onRemove={row => setTableInfo(tbl => editorDeleteConstraint(tbl, row))}
-    on:clickrow={e => showModal(ForeignKeyEditorModal, { constraintInfo: e.detail, tableInfo, setTableInfo, dbInfo })}
-  />
-  <ForeignKeyObjectListControl collection={dependencies} title="Dependencies" />
+  {#if !driver?.dialect?.omitUniqueConstraints}
+    <ObjectListControl
+      collection={uniques}
+      onAddNew={isWritable && columns?.length > 0 ? addUnique : null}
+      title={`Unique constraints (${uniques?.length || 0})`}
+      emptyMessage={isWritable ? 'No unique defined' : null}
+      clickable
+      on:clickrow={e => showModal(UniqueEditorModal, { constraintInfo: e.detail, tableInfo, setTableInfo })}
+      columns={[
+        {
+          fieldName: 'columns',
+          header: 'Columns',
+          slot: 0,
+          sortable: true,
+        },
+        isWritable
+          ? {
+              fieldName: 'actions',
+              sortable: true,
+              slot: 1,
+            }
+          : null,
+      ]}
+    >
+      <svelte:fragment slot="name" let:row><ConstraintLabel {...row} /></svelte:fragment>
+      <svelte:fragment slot="0" let:row>{row?.columns.map(x => x.columnName).join(', ')}</svelte:fragment>
+      <svelte:fragment slot="1" let:row
+        ><Link
+          onClick={e => {
+            e.stopPropagation();
+            setTableInfo(tbl => editorDeleteConstraint(tbl, row));
+          }}>Remove</Link
+        ></svelte:fragment
+      >
+    </ObjectListControl>
+  {/if}
+
+  {#if !driver?.dialect?.omitForeignKeys}
+    <ForeignKeyObjectListControl
+      collection={foreignKeys}
+      onAddNew={isWritable && columns?.length > 0 ? addForeignKey : null}
+      title={`Foreign keys (${foreignKeys?.length || 0})`}
+      emptyMessage={isWritable ? 'No foreign key defined' : null}
+      clickable
+      onRemove={row => setTableInfo(tbl => editorDeleteConstraint(tbl, row))}
+      on:clickrow={e => showModal(ForeignKeyEditorModal, { constraintInfo: e.detail, tableInfo, setTableInfo, dbInfo })}
+    />
+    <ForeignKeyObjectListControl collection={dependencies} title="Dependencies" />
+  {/if}
 </div>
 
 <style>

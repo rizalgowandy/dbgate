@@ -1,5 +1,6 @@
 <script lang="ts">
-  import FormStyledButton from '../elements/FormStyledButton.svelte';
+  import { SqlDumper } from 'dbgate-tools';
+  import FormStyledButton from '../buttons/FormStyledButton.svelte';
   import TableControl from '../elements/TableControl.svelte';
   import TextField from '../forms/TextField.svelte';
   import analyseQuerySources from '../query/analyseQuerySources';
@@ -63,9 +64,11 @@
     const source = sources[sourceIndex];
     const target = targets[targetIndex];
     if (source && target) {
-      return `${JOIN_TYPES[joinIndex]} ${target.refTable}${alias ? ` ${alias}` : ''} ON ${target.columnMap
+      return `${SqlDumper.convertKeywordCase(JOIN_TYPES[joinIndex])} ${target.refTable}${
+        alias ? ` ${alias}` : ''
+      } ${SqlDumper.convertKeywordCase('ON')} ${target.columnMap
         .map(col => `${source.name}.${col.columnName} = ${alias || target.refTable}.${col.refColumnName}`)
-        .join(' AND ')}`;
+        .join(SqlDumper.convertKeywordCase(' AND '))}`;
     }
     return '';
   }

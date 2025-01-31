@@ -1,12 +1,11 @@
 <script>
   import ErrorInfo from '../elements/ErrorInfo.svelte';
   import TableControl from '../elements/TableControl.svelte';
+  import { apiOff, apiOn, apiCall } from '../utility/api';
 
-  import axiosInstance from '../utility/axiosInstance';
   import formatFileSize from '../utility/formatFileSize';
   import getElectron from '../utility/getElectron';
-  import resolveApi from '../utility/resolveApi';
-  import socket from '../utility/socket';
+  import { downloadFromApi } from '../utility/exportFileTools';
   import useEffect from '../utility/useEffect';
 
   export let runnerId;
@@ -22,9 +21,9 @@
 
   function registerRunnerDone(rid) {
     if (rid) {
-      socket.on(`runner-done-${rid}`, handleRunnerDone);
+      apiOn(`runner-done-${rid}`, handleRunnerDone);
       return () => {
-        socket.off(`runner-done-${rid}`, handleRunnerDone);
+        apiOff(`runner-done-${rid}`, handleRunnerDone);
       };
     } else {
       return () => {};
@@ -34,8 +33,8 @@
   $: $effect;
 
   const handleRunnerDone = async () => {
-    const resp = await axiosInstance.get(`runners/files?runid=${runnerId}`);
-    files = resp.data;
+    const resp = await apiCall('runners/files', { runid: runnerId });
+    files = resp;
   };
 </script>
 
@@ -67,9 +66,10 @@
     <a
       slot="0"
       let:row
-      href={`${resolveApi()}/runners/data/${runnerId}/${row.name}`}
-      target="_blank"
-      rel="noopener noreferrer"
+      href="#"
+      on:click={() => {
+        downloadFromApi(`runners/data/${runnerId}/${row.name}`, row.name);
+      }}
     >
       download
     </a>
@@ -78,8 +78,8 @@
       slot="1"
       let:row
       href="#"
-      on:click={() => {
-        const file = electron.remote.dialog.showSaveDialogSync(electron.remote.getCurrentWindow(), {});
+      on:click={async () => {
+        const file = await electron.showSaveDialog({});
         if (file) {
           const fs = window.require('fs');
           fs.copyFile(row.path, file, () => {});
@@ -94,7 +94,7 @@
       let:row
       href="#"
       on:click={() => {
-        electron.remote.shell.showItemInFolder(row.path);
+        electron.showItemInFolder(row.path);
       }}
     >
       show

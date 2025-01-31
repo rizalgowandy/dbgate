@@ -1,14 +1,58 @@
-const { SSHConnection } = require('node-ssh-forward');
-const portfinder = require('portfinder');
 const fs = require('fs-extra');
 const { decryptConnection } = require('./crypting');
-const { getSshTunnel } = require('./sshTunnel');
 const { getSshTunnelProxy } = require('./sshTunnelProxy');
+const platformInfo = require('../utility/platformInfo');
+const connections = require('../controllers/connections');
+const _ = require('lodash');
 
-async function connectUtility(driver, storedConnection) {
+async function loadConnection(driver, storedConnection, connectionMode) {
+  const { allowShellConnection, allowConnectionFromEnvVariables } = platformInfo;
+
+  if (connectionMode == 'app') {
+    return storedConnection;
+  }
+
+  if (storedConnection._id || !allowShellConnection) {
+    if (!storedConnection._id) {
+      throw new Error('Missing connection _id');
+    }
+
+    await connections._init();
+    const loaded = await connections.getCore({ conid: storedConnection._id });
+    const loadedWithDb = {
+      ...loaded,
+      database: storedConnection.database,
+    };
+
+    if (loaded.isReadOnly) {
+      if (connectionMode == 'read') return loadedWithDb;
+      if (connectionMode == 'write') throw new Error('Cannot write readonly connection');
+      if (connectionMode == 'script') {
+        if (driver.readOnlySessions) return loadedWithDb;
+        throw new Error('Cannot write readonly connection');
+      }
+    }
+    return loadedWithDb;
+  }
+
+  if (allowConnectionFromEnvVariables) {
+    return _.mapValues(storedConnection, (value, key) => {
+      if (_.isString(value) && value.startsWith('${') && value.endsWith('}')) {
+        return process.env[value.slice(2, -1)];
+      }
+      return value;
+    });
+  }
+
+  return storedConnection;
+}
+
+async function connectUtility(driver, storedConnection, connectionMode, additionalOptions = null) {
+  const connectionLoaded = await loadConnection(driver, storedConnection, connectionMode);
+
   const connection = {
-    database: storedConnection.defaultDatabase,
-    ...decryptConnection(storedConnection),
+    database: connectionLoaded.defaultDatabase,
+    ...decryptConnection(connectionLoaded),
   };
 
   if (!connection.port && driver.defaultPort) connection.port = driver.defaultPort.toString();
@@ -19,7 +63,7 @@ async function connectUtility(driver, storedConnection) {
       throw new Error(tunnel.message);
     }
 
-    connection.server = '127.0.0.1';
+    connection.server = tunnel.localHost;
     connection.port = tunnel.localPort;
   }
 
@@ -29,14 +73,17 @@ async function connectUtility(driver, storedConnection) {
 
     if (connection.sslCaFile) {
       connection.ssl.ca = await fs.readFile(connection.sslCaFile);
+      connection.ssl.sslCaFile = connection.sslCaFile;
     }
 
     if (connection.sslCertFile) {
       connection.ssl.cert = await fs.readFile(connection.sslCertFile);
+      connection.ssl.sslCertFile = connection.sslCertFile;
     }
 
     if (connection.sslKeyFile) {
       connection.ssl.key = await fs.readFile(connection.sslKeyFile);
+      connection.ssl.sslKeyFile = connection.sslKeyFile;
     }
 
     if (connection.sslCertFilePassword) {
@@ -57,7 +104,7 @@ async function connectUtility(driver, storedConnection) {
     }
   }
 
-  const conn = await driver.connect(connection);
+  const conn = await driver.connect({ ...connection, ...additionalOptions });
   return conn;
 }
 

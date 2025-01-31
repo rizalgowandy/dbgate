@@ -3,9 +3,17 @@ const stream = require('stream');
 const driverBase = require('../frontend/driver');
 const Analyser = require('./Analyser');
 const { splitQuery, sqliteSplitterOptions } = require('dbgate-query-splitter');
-const { createBulkInsertStreamBase, makeUniqueColumnNames } = require('dbgate-tools');
+const { getLogger, createBulkInsertStreamBase, extractErrorLogData } = global.DBGATE_PACKAGES['dbgate-tools'];
 
-let Database;
+const logger = getLogger('sqliteDriver');
+
+let betterSqliteValue;
+function getBetterSqlite() {
+  if (!betterSqliteValue) {
+    betterSqliteValue = require('better-sqlite3');
+  }
+  return betterSqliteValue;
+}
 
 async function waitForDrain(stream) {
   return new Promise((resolve) => {
@@ -16,8 +24,8 @@ async function waitForDrain(stream) {
   });
 }
 
-function runStreamItem(client, sql, options, rowCounter) {
-  const stmt = client.prepare(sql);
+function runStreamItem(dbhan, sql, options, rowCounter) {
+  const stmt = dbhan.client.prepare(sql);
   if (stmt.reader) {
     const columns = stmt.columns();
     // const rows = stmt.all();
@@ -52,16 +60,20 @@ function runStreamItem(client, sql, options, rowCounter) {
 const driver = {
   ...driverBase,
   analyserClass: Analyser,
-  async connect({ databaseFile }) {
-    const pool = new Database(databaseFile);
-    return pool;
+  async connect({ databaseFile, isReadOnly }) {
+    const Database = getBetterSqlite();
+    const client = new Database(databaseFile, { readonly: !!isReadOnly });
+    return {
+      client,
+    };
   },
-  async close(pool) {
-    return pool.close();
+  async close(dbhan) {
+    // sqlite close is sync, returns this
+    dbhan.client.close();
   },
   // @ts-ignore
-  async query(pool, sql) {
-    const stmt = pool.prepare(sql);
+  async query(dbhan, sql) {
+    const stmt = dbhan.client.prepare(sql);
     // stmt.raw();
     if (stmt.reader) {
       const columns = stmt.columns();
@@ -81,14 +93,14 @@ const driver = {
       };
     }
   },
-  async stream(client, sql, options) {
+  async stream(dbhan, sql, options) {
     const sqlSplitted = splitQuery(sql, sqliteSplitterOptions);
 
     const rowCounter = { count: 0, date: null };
 
-    const inTransaction = client.transaction(() => {
+    const inTransaction = dbhan.client.transaction(() => {
       for (const sqlItem of sqlSplitted) {
-        runStreamItem(client, sqlItem, options, rowCounter);
+        runStreamItem(dbhan, sqlItem, options, rowCounter);
       }
 
       if (rowCounter.date) {
@@ -103,11 +115,11 @@ const driver = {
     try {
       inTransaction();
     } catch (error) {
-      console.log('ERROR', error);
-      const { message, lineNumber, procName } = error;
+      logger.error(extractErrorLogData(error), 'Stream error');
+      const { message, procName } = error;
       options.info({
         message,
-        line: lineNumber,
+        line: 0,
         procedure: procName,
         time: new Date(),
         severity: 'error',
@@ -117,10 +129,10 @@ const driver = {
     options.done();
     // return stream;
   },
-  async script(client, sql) {
-    const inTransaction = client.transaction(() => {
+  async script(dbhan, sql) {
+    const inTransaction = dbhan.client.transaction(() => {
       for (const sqlItem of splitQuery(sql, this.getQuerySplitterOptions('script'))) {
-        const stmt = client.prepare(sqlItem);
+        const stmt = dbhan.client.prepare(sqlItem);
         stmt.run();
       }
     });
@@ -138,13 +150,13 @@ const driver = {
     }
     pass.end();
   },
-  async readQuery(pool, sql, structure) {
+  async readQuery(dbhan, sql, structure) {
     const pass = new stream.PassThrough({
       objectMode: true,
       highWaterMark: 100,
     });
 
-    const stmt = pool.prepare(sql);
+    const stmt = dbhan.client.prepare(sql);
     const columns = stmt.columns();
 
     pass.write({
@@ -160,11 +172,11 @@ const driver = {
 
     return pass;
   },
-  async writeTable(pool, name, options) {
-    return createBulkInsertStreamBase(this, stream, pool, name, options);
+  async writeTable(dbhan, name, options) {
+    return createBulkInsertStreamBase(this, stream, dbhan, name, options);
   },
-  async getVersion(pool) {
-    const { rows } = await this.query(pool, 'select sqlite_version() as version');
+  async getVersion(dbhan) {
+    const { rows } = await this.query(dbhan, 'select sqlite_version() as version');
     const { version } = rows[0];
 
     return {
@@ -174,10 +186,6 @@ const driver = {
   },
 };
 
-driver.initialize = (dbgateEnv) => {
-  if (dbgateEnv.nativeModules && dbgateEnv.nativeModules['better-sqlite3-with-prebuilds']) {
-    Database = dbgateEnv.nativeModules['better-sqlite3-with-prebuilds']();
-  }
-};
+driver.initialize = (dbgateEnv) => {};
 
 module.exports = driver;

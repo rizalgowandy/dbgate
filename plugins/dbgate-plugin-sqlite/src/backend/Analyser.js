@@ -1,23 +1,10 @@
 const _ = require('lodash');
-const { DatabaseAnalyser } = require('dbgate-tools');
-
-const indexcolsQuery = `
-SELECT 
-    m.name as tableName,
-    il.name as constraintName,
-    il."unique" as isUnique,
-    ii.name as columnName,
-    il.origin
-  FROM sqlite_schema AS m,
-       pragma_index_list(m.name) AS il,
-       pragma_index_info(il.name) AS ii
- WHERE m.type='table' AND il.origin <> 'pk'
- ORDER BY ii.seqno, il.name
-  `;
+const { DatabaseAnalyser } = global.DBGATE_PACKAGES['dbgate-tools'];
+const sql = require('./sql');
 
 class Analyser extends DatabaseAnalyser {
-  constructor(pool, driver, version) {
-    super(pool, driver, version);
+  constructor(dbhan, driver, version) {
+    super(dbhan, driver, version);
   }
 
   async _computeSingleObjectId() {
@@ -26,8 +13,8 @@ class Analyser extends DatabaseAnalyser {
   }
 
   async _getFastSnapshot() {
-    const objects = await this.driver.query(this.pool, "select * from sqlite_master where type='table' or type='view'");
-    const indexcols = await this.driver.query(this.pool, indexcolsQuery);
+    const objects = await this.driver.query(this.dbhan, sql.objects);
+    const indexcols = await this.driver.query(this.dbhan, sql.indexcols);
 
     return {
       tables: objects.rows
@@ -53,13 +40,7 @@ class Analyser extends DatabaseAnalyser {
   }
 
   async _runAnalysis() {
-    const objects = await this.driver.query(
-      this.pool,
-      super.createQuery(
-        "select * from sqlite_master where (type='table' or type='view') and name =OBJECT_ID_CONDITION",
-        ['tables', 'views']
-      )
-    );
+    const objects = await this.analyserQuery(sql.objectsConditioned, ['tables', 'views']);
     const tables = objects.rows.filter((x) => x.type == 'table');
     const views = objects.rows.filter((x) => x.type == 'view');
     // console.log('TABLES', tables);
@@ -82,7 +63,7 @@ class Analyser extends DatabaseAnalyser {
       createSql: x.sql,
     }));
 
-    const indexcols = await this.driver.query(this.pool, indexcolsQuery);
+    const indexcols = await this.driver.query(this.dbhan, sql.indexcols);
 
     for (const tableName of this.getRequestedObjectPureNames(
       'tables',
@@ -91,7 +72,7 @@ class Analyser extends DatabaseAnalyser {
       const tableObj = tableList.find((x) => x.pureName == tableName);
       if (!tableObj) continue;
 
-      const info = await this.driver.query(this.pool, `pragma table_info('${tableName}')`);
+      const info = await this.driver.query(this.dbhan, `pragma table_info('${tableName}')`);
       tableObj.columns = info.rows.map((col) => ({
         columnName: col.name,
         dataType: col.type,
@@ -135,7 +116,7 @@ class Analyser extends DatabaseAnalyser {
         };
       }
 
-      const fklist = await this.driver.query(this.pool, `pragma foreign_key_list('${tableName}')`);
+      const fklist = await this.driver.query(this.dbhan, `pragma foreign_key_list('${tableName}')`);
       tableObj.foreignKeys = _.values(_.groupBy(fklist.rows, 'id')).map((fkcols) => {
         const fkcol = fkcols[0];
         const fk = {
@@ -160,7 +141,7 @@ class Analyser extends DatabaseAnalyser {
       const viewObj = viewList.find((x) => x.pureName == viewName);
       if (!viewObj) continue;
 
-      const info = await this.driver.query(this.pool, `pragma table_info('${viewName}')`);
+      const info = await this.driver.query(this.dbhan, `pragma table_info('${viewName}')`);
       viewObj.columns = info.rows.map((col) => ({
         columnName: col.name,
         dataType: col.type,
@@ -168,9 +149,12 @@ class Analyser extends DatabaseAnalyser {
       }));
     }
 
+    const triggers = await this.driver.query(this.dbhan, sql.triggers);
+
     return {
       tables: tableList,
       views: viewList,
+      triggers: triggers.rows,
     };
   }
 }

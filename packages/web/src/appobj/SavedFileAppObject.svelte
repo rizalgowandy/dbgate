@@ -1,4 +1,6 @@
 <script lang="ts" context="module">
+  import { filterName, getConnectionLabel } from 'dbgate-tools';
+
   interface FileTypeHandler {
     icon: string;
     format: string;
@@ -55,16 +57,56 @@
     currentConnection: true,
   };
 
-  const HANDLERS = {
+  const diagrams: FileTypeHandler = {
+    icon: 'img diagram',
+    format: 'json',
+    tabComponent: 'DiagramTab',
+    folder: 'diagrams',
+    currentConnection: true,
+  };
+
+  const jobs: FileTypeHandler = {
+    icon: 'img export',
+    format: 'json',
+    tabComponent: 'ImportExportTab',
+    folder: 'jobs',
+    currentConnection: false,
+  };
+
+  const perspectives: FileTypeHandler = {
+    icon: 'img perspective',
+    format: 'json',
+    tabComponent: 'PerspectiveTab',
+    folder: 'pesrpectives',
+    currentConnection: true,
+  };
+
+  const modtrans: FileTypeHandler = {
+    icon: 'img transform',
+    format: 'text',
+    tabComponent: 'ModelTransformTab',
+    folder: 'modtrans',
+    currentConnection: false,
+  };
+
+  export const SAVED_FILE_HANDLERS = {
     sql,
     shell,
     markdown,
     charts,
     query,
     sqlite,
+    diagrams,
+    perspectives,
+    jobs,
+    modtrans,
   };
 
   export const extractKey = data => data.file;
+  export const createMatcher =
+    filter =>
+    ({ file }) =>
+      filterName(filter, file);
 </script>
 
 <script lang="ts">
@@ -74,9 +116,8 @@
   import { showModal } from '../modals/modalTools';
 
   import { currentDatabase } from '../stores';
+  import { apiCall } from '../utility/api';
 
-  import axiosInstance from '../utility/axiosInstance';
-  import getConnectionLabel from '../utility/getConnectionLabel';
   import hasPermission from '../utility/hasPermission';
   import openNewTab from '../utility/openNewTab';
 
@@ -85,7 +126,7 @@
   export let data;
 
   $: folder = data?.folder;
-  $: handler = HANDLERS[folder] as FileTypeHandler;
+  $: handler = SAVED_FILE_HANDLERS[folder] as FileTypeHandler;
 
   const showMarkdownPage = () => {
     openNewTab({
@@ -114,7 +155,7 @@
     showModal(ConfirmModal, {
       message: `Really delete file ${data.file}?`,
       onConfirm: () => {
-        axiosInstance.post('files/delete', data);
+        apiCall('files/delete', data);
       },
     });
   };
@@ -125,7 +166,7 @@
       label: 'New file name',
       header: 'Rename file',
       onConfirm: newFile => {
-        axiosInstance.post('files/rename', { ...data, newFile });
+        apiCall('files/rename', { ...data, newFile });
       },
     });
   };
@@ -136,13 +177,13 @@
       label: 'New file name',
       header: 'Rename file',
       onConfirm: newFile => {
-        axiosInstance.post('files/copy', { ...data, newFile });
+        apiCall('files/copy', { ...data, newFile });
       },
     });
   };
 
   async function openTab() {
-    const resp = await axiosInstance.post('files/load', { folder, file: data.file, format: handler.format });
+    const resp = await apiCall('files/load', { folder, file: data.file, format: handler.format });
 
     const connProps: any = {};
     let tooltip = undefined;
@@ -168,7 +209,7 @@
           ...connProps,
         },
       },
-      { editor: resp.data }
+      { editor: resp }
     );
   }
 </script>

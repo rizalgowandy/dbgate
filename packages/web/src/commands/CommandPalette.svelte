@@ -1,11 +1,9 @@
 <script context="module">
-  const electron = getElectron();
-
   registerCommand({
     id: 'commandPalette.show',
     category: 'Command palette',
     name: 'Show',
-    toolbarName: 'Search',
+    toolbarName: 'Command palette',
     toolbarOrder: 0,
     keyText: 'F1',
     toolbar: true,
@@ -20,7 +18,7 @@
     category: 'Database',
     toolbarName: 'Database search',
     name: 'Search',
-    keyText: electron ? 'Ctrl+P' : 'F3',
+    keyText: isElectronAvailable() ? 'CtrlOrCommand+P' : 'F3',
     onClick: () => visibleCommandPalette.set('database'),
     testEnabled: () => getVisibleCommandPalette() != 'database',
   });
@@ -41,12 +39,14 @@
     const databaseList = [];
     for (const connection of connectionList || []) {
       const conid = connection._id;
+      if (connection.singleDatabase) continue;
+      if (getCurrentConfig()?.singleDbConnection) continue;
       const databases = getLocalStorage(`database_list_${conid}`) || [];
       for (const db of databases) {
         databaseList.push({
           text: `${db.name} on ${getConnectionLabel(connection)}`,
           icon: 'img database',
-          onClick: () => currentDatabase.set({ connection, name: db.name }),
+          onClick: () => switchCurrentDatabase({ connection, name: db.name }),
         });
       }
     }
@@ -60,26 +60,27 @@
 </script>
 
 <script>
-  import { filterName } from 'dbgate-tools';
+  import { filterName, getConnectionLabel } from 'dbgate-tools';
 
   import _ from 'lodash';
   import { onMount } from 'svelte';
+  import fuzzy from 'fuzzy';
   import { databaseObjectIcons, handleDatabaseObjectClick } from '../appobj/DatabaseObjectAppObject.svelte';
   import FontIcon from '../icons/FontIcon.svelte';
   import {
-    commands,
     commandsCustomized,
     currentDatabase,
+    getCurrentConfig,
     getVisibleCommandPalette,
     visibleCommandPalette,
   } from '../stores';
   import clickOutside from '../utility/clickOutside';
-  import getConnectionLabel from '../utility/getConnectionLabel';
-  import getElectron from '../utility/getElectron';
+  import { isElectronAvailable } from '../utility/getElectron';
   import keycodes from '../utility/keycodes';
   import { useConnectionList, useDatabaseInfo } from '../utility/metadataLoaders';
   import { getLocalStorage } from '../utility/storageCache';
   import registerCommand from './registerCommand';
+  import { formatKeyText, switchCurrentDatabase } from '../utility/common';
 
   let domInput;
   let filter = '';
@@ -106,12 +107,25 @@
   $: databaseInfo = useDatabaseInfo({ conid, database });
   $: connectionList = useConnectionList();
 
-  $: filteredItems = ($visibleCommandPalette == 'database'
-    ? extractDbItems($databaseInfo, { conid, database }, $connectionList)
-    : parentCommand
-    ? parentCommand.getSubCommands()
-    : sortedComands
-  ).filter(x => !x.isGroupCommand && filterName(filter, x.text));
+  $: filteredItems = fuzzy
+    .filter(
+      filter,
+      ($visibleCommandPalette == 'database'
+        ? extractDbItems($databaseInfo, { conid, database }, $connectionList)
+        : parentCommand
+        ? parentCommand.getSubCommands()
+        : sortedComands
+      ).filter(x => !x.isGroupCommand),
+      {
+        extract: x => x.text,
+        pre: '<b>',
+        post: '</b>',
+      }
+    )
+    .map(x => ({
+      ...x.original,
+      text: x.string,
+    }));
 
   function handleCommand(command) {
     if (command.getSubCommands) {
@@ -148,6 +162,7 @@
   on:clickOutside={() => {
     $visibleCommandPalette = null;
   }}
+  data-testid='CommandPalette_main'
 >
   <div class="pages">
     <div
@@ -178,7 +193,8 @@
         bind:this={domInput}
         bind:value={filter}
         on:keydown={handleKeyDown}
-        placeholder={parentCommand?.text || ''}
+        placeholder={parentCommand?.text ||
+          ($visibleCommandPalette == 'database' ? 'Search in database' : 'Search in commands')}
       />
     </div>
     <div class="content">
@@ -193,10 +209,10 @@
             {#if command.icon}
               <span class="mr-1"><FontIcon icon={command.icon} /></span>
             {/if}
-            {command.text}
+            {@html command.text}
           </div>
           {#if command.keyText}
-            <div class="shortcut">{command.keyText}</div>
+            <div class="shortcut">{formatKeyText(command.keyText)}</div>
           {/if}
         </div>
       {/each}

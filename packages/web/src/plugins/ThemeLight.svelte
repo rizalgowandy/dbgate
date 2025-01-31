@@ -1,12 +1,12 @@
 <script context="module">
-  export const className = 'theme-light';
+  export const themeClassName = 'theme-light';
   export const themeName = 'Light';
   export const themeType = 'light';
 </script>
 
 <style>
   :global(.theme-light) {
-    --theme-font-1: #000000;
+    --theme-font-1: #262626;
     --theme-font-2: #4d4d4d;
     --theme-font-3: #808080;
     --theme-font-4: #b3b3b3;
@@ -42,7 +42,7 @@
 
     --theme-border: #ccc;
 
-    --theme-bg-hover: #bae7ff;
+    --theme-bg-hover: #ccc;
     --theme-bg-selected: #91d5ff; /* blue-3 */
     --theme-bg-selected-point: #40a9ff; /* blue-5 */
     

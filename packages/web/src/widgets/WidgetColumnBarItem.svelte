@@ -12,7 +12,6 @@
   export let title;
   export let name;
   export let skip = false;
-  export let show = true;
   export let height = null;
   export let collapsed = null;
 
@@ -22,6 +21,7 @@
 
   const dynamicProps = writable({
     splitterVisible: false,
+    visibleItemsCount: 0,
   });
 
   const pushWidgetItemDefinition = getContext('pushWidgetItemDefinition') as any;
@@ -31,12 +31,12 @@
     {
       collapsed,
       height,
-      skip: skip || !show,
+      skip,
     },
     dynamicProps
   );
 
-  $: updateWidgetItemDefinition(widgetItemIndex, { collapsed: !visible, height, skip: skip || !show });
+  $: updateWidgetItemDefinition(widgetItemIndex, { collapsed: !visible, height, skip });
 
   $: setInitialSize(height, $widgetColumnBarHeight);
 
@@ -62,10 +62,16 @@
     storageName && getLocalStorage(storageName) && getLocalStorage(storageName).visible != null
       ? getLocalStorage(storageName).visible
       : !collapsed;
+
+  $: collapsible = $dynamicProps.visibleItemsCount != 1 || !visible;
 </script>
 
-{#if !skip && show}
-  <WidgetTitle on:click={() => (visible = !visible)}>{title}</WidgetTitle>
+{#if !skip}
+  <WidgetTitle
+    clickable={collapsible}
+    on:click={collapsible ? () => (visible = !visible) : null}
+    data-testid={$$props['data-testid']}>{title}</WidgetTitle
+  >
 
   {#if visible}
     <div class="wrapper" style={$dynamicProps.splitterVisible ? `height:${size}px` : 'flex: 1 1 0'}>

@@ -1,4 +1,4 @@
-import { NamedObjectInfo, RangeDefinition, TransformType } from 'dbgate-types';
+import type { NamedObjectInfo, RangeDefinition, TransformType } from 'dbgate-types';
 
 // export interface Command {
 // }
@@ -26,18 +26,24 @@ export interface Update {
   fields: UpdateField[];
   from: FromDefinition;
   where?: Condition;
+  // ALTER TABLE xxx UPDATE col1=val1 - syntax for ClickHouse
+  alterTableUpdateSyntax?: boolean;
 }
 
 export interface Delete {
   commandType: 'delete';
   from: FromDefinition;
   where?: Condition;
+
+  // ALTER TABLE xxx DELETE  - syntax for ClickHouse
+  alterTableDeleteSyntax?: boolean;
 }
 
 export interface Insert {
   commandType: 'insert';
   fields: UpdateField[];
   targetTable: NamedObjectInfo;
+  insertWhereNotExistsCondition?: Condition;
 }
 
 export interface AllowIdentityInsert {
@@ -56,9 +62,14 @@ export interface UnaryCondition {
   expr: Expression;
 }
 
+export interface ExpressionCondition extends UnaryCondition {
+  // not in standard SQL
+  conditionType: 'expression';
+}
+
 export interface BinaryCondition {
   conditionType: 'binary';
-  operator: '=' | '!=' | '<' | '>' | '>=' | '<=';
+  operator: '=' | '!=' | '<>' | '<' | '>' | '>=' | '<=';
   left: Expression;
   right: Expression;
 }
@@ -76,6 +87,11 @@ export interface NotCondition {
 
 export interface TestCondition extends UnaryCondition {
   conditionType: 'isNull' | 'isNotNull' | 'isEmpty' | 'isNotEmpty';
+}
+
+export interface SpecificPredicateCondition extends UnaryCondition {
+  conditionType: 'specificPredicate';
+  predicate: string;
 }
 
 export interface CompoudCondition {
@@ -99,6 +115,29 @@ export interface BetweenCondition {
   right: Expression;
 }
 
+export interface InCondition {
+  conditionType: 'in';
+  expr: Expression;
+  values: any[];
+}
+
+export interface NotInCondition {
+  conditionType: 'notIn';
+  expr: Expression;
+  values: any[];
+}
+
+export interface RawTemplateCondition {
+  conditionType: 'rawTemplate';
+  templateSql: string;
+  expr: Expression;
+}
+
+export interface AnyColumnPassEvalOnlyCondition {
+  conditionType: 'anyColumnPass';
+  placeholderCondition: Condition;
+}
+
 export type Condition =
   | BinaryCondition
   | NotCondition
@@ -107,7 +146,13 @@ export type Condition =
   | LikeCondition
   | ExistsCondition
   | NotExistsCondition
-  | BetweenCondition;
+  | BetweenCondition
+  | InCondition
+  | NotInCondition
+  | RawTemplateCondition
+  | AnyColumnPassEvalOnlyCondition
+  | SpecificPredicateCondition
+  | ExpressionCondition;
 
 export interface Source {
   name?: NamedObjectInfo;
@@ -148,11 +193,25 @@ export interface RawExpression {
   sql: string;
 }
 
+export interface UnaryRawExpression {
+  exprType: 'unaryRaw';
+  expr: Expression;
+  beforeSql?: string;
+  afterSql?: string;
+}
+
 export interface CallExpression {
   exprType: 'call';
   func: string;
   args: Expression[];
   argsPrefix?: string; // DISTINCT in case of COUNT DISTINCT
+}
+
+export interface MethodCallExpression {
+  exprType: 'methodCall';
+  method: string;
+  args: Expression[];
+  thisObject: Expression;
 }
 
 export interface TranformExpression {
@@ -171,7 +230,9 @@ export type Expression =
   | ValueExpression
   | PlaceholderExpression
   | RawExpression
+  | UnaryRawExpression
   | CallExpression
+  | MethodCallExpression
   | TranformExpression
   | RowNumberExpression;
 export type OrderByExpression = Expression & { direction: 'ASC' | 'DESC' };

@@ -16,7 +16,7 @@
     id: 'dataForm.refresh',
     category: 'Data form',
     name: 'Refresh',
-    keyText: 'F5',
+    keyText: 'F5 | CtrlOrCommand+R',
     toolbar: true,
     isRelatedToTab: true,
     icon: 'icon reload',
@@ -28,8 +28,8 @@
     id: 'dataForm.copyToClipboard',
     category: 'Data form',
     name: 'Copy to clipboard',
-    keyText: 'Ctrl+C',
-    disableHandleKeyText: 'Ctrl+C',
+    keyText: 'CtrlOrCommand+C',
+    disableHandleKeyText: 'CtrlOrCommand+C',
     testEnabled: () => getCurrentDataForm() != null,
     onClick: () => getCurrentDataForm().copyToClipboard(),
   });
@@ -38,18 +38,27 @@
     id: 'dataForm.revertRowChanges',
     category: 'Data form',
     name: 'Revert row changes',
-    keyText: 'Ctrl+R',
-    testEnabled: () => getCurrentDataForm()?.getFormer()?.containsChanges,
-    onClick: () => getCurrentDataForm().getFormer().revertRowChanges(),
+    keyText: 'CtrlOrCommand+U',
+    testEnabled: () => getCurrentDataForm()?.getGrider()?.containsChanges,
+    onClick: () => getCurrentDataForm().getGrider().revertRowChanges(0),
   });
 
   registerCommand({
     id: 'dataForm.setNull',
     category: 'Data form',
     name: 'Set NULL',
-    keyText: 'Ctrl+0',
-    testEnabled: () => getCurrentDataForm() != null,
+    keyText: 'CtrlOrCommand+0',
+    testEnabled: () => getCurrentDataForm() != null && !getCurrentDataForm()?.getEditorTypes()?.supportFieldRemoval,
     onClick: () => getCurrentDataForm().setFixedValue(null),
+  });
+
+  registerCommand({
+    id: 'dataForm.removeField',
+    category: 'Data form',
+    name: 'Remove field',
+    keyText: 'CtrlOrCommand+0',
+    testEnabled: () => getCurrentDataForm() != null && getCurrentDataForm()?.getEditorTypes()?.supportFieldRemoval,
+    onClick: () => getCurrentDataForm().setFixedValue(undefined),
   });
 
   registerCommand({
@@ -60,8 +69,8 @@
     icon: 'icon undo',
     toolbar: true,
     isRelatedToTab: true,
-    testEnabled: () => getCurrentDataForm()?.getFormer()?.canUndo,
-    onClick: () => getCurrentDataForm().getFormer().undo(),
+    testEnabled: () => getCurrentDataForm()?.getGrider()?.canUndo,
+    onClick: () => getCurrentDataForm().getGrider().undo(),
   });
 
   registerCommand({
@@ -72,8 +81,8 @@
     icon: 'icon redo',
     toolbar: true,
     isRelatedToTab: true,
-    testEnabled: () => getCurrentDataForm()?.getFormer()?.canRedo,
-    onClick: () => getCurrentDataForm().getFormer().redo(),
+    testEnabled: () => getCurrentDataForm()?.getGrider()?.canRedo,
+    onClick: () => getCurrentDataForm().getGrider().redo(),
   });
 
   registerCommand({
@@ -88,7 +97,7 @@
     id: 'dataForm.filterSelected',
     category: 'Data form',
     name: 'Filter this value',
-    keyText: 'Ctrl+Shift+F',
+    keyText: 'CtrlOrCommand+Shift+F',
     testEnabled: () => getCurrentDataForm() != null,
     onClick: () => getCurrentDataForm().filterSelectedValue(),
   });
@@ -105,7 +114,7 @@
     id: 'dataForm.goToFirst',
     category: 'Data form',
     name: 'First',
-    keyText: 'Ctrl+Home',
+    keyText: 'CtrlOrCommand+Home',
     toolbar: true,
     isRelatedToTab: true,
     icon: 'icon arrow-begin',
@@ -117,7 +126,7 @@
     id: 'dataForm.goToPrevious',
     category: 'Data form',
     name: 'Previous',
-    keyText: 'Ctrl+ArrowUp',
+    keyText: 'CtrlOrCommand+ArrowUp',
     toolbar: true,
     isRelatedToTab: true,
     icon: 'icon arrow-left',
@@ -129,7 +138,7 @@
     id: 'dataForm.goToNext',
     category: 'Data form',
     name: 'Next',
-    keyText: 'Ctrl+ArrowDown',
+    keyText: 'CtrlOrCommand+ArrowDown',
     toolbar: true,
     isRelatedToTab: true,
     icon: 'icon arrow-right',
@@ -141,7 +150,7 @@
     id: 'dataForm.goToLast',
     category: 'Data form',
     name: 'Last',
-    keyText: 'Ctrl+End',
+    keyText: 'CtrlOrCommand+End',
     toolbar: true,
     isRelatedToTab: true,
     icon: 'icon arrow-end',
@@ -155,7 +164,9 @@
 </script>
 
 <script lang="ts">
-  import { filterName } from 'dbgate-tools';
+  import { getFilterValueExpression } from 'dbgate-filterparser';
+
+  import { filterName, shouldOpenMultilineDialog, stringifyCellValue } from 'dbgate-tools';
 
   import _ from 'lodash';
 
@@ -173,16 +184,19 @@
   import { plusExpandIcon } from '../icons/expandIcons';
   import FontIcon from '../icons/FontIcon.svelte';
   import DictionaryLookupModal from '../modals/DictionaryLookupModal.svelte';
+  import EditCellDataModal from '../modals/EditCellDataModal.svelte';
   import { showModal } from '../modals/modalTools';
+  import { apiCall } from '../utility/api';
 
-  import axiosInstance from '../utility/axiosInstance';
   import { copyTextToClipboard, extractRowCopiedValue } from '../utility/clipboard';
+  import { isCtrlOrCommandKey } from '../utility/common';
   import contextMenu, { getContextMenu, registerMenu } from '../utility/contextMenu';
   import createActivator, { getActiveComponent } from '../utility/createActivator';
   import createReducer from '../utility/createReducer';
   import keycodes from '../utility/keycodes';
   import resizeObserver from '../utility/resizeObserver';
   import openReferenceForm from './openReferenceForm';
+  import { useSettings } from '../utility/metadataLoaders';
 
   export let conid;
   export let database;
@@ -192,41 +206,60 @@
   export let allRowCount;
   export let rowCountBefore;
   export let isLoading;
-  export let former;
-  export let formDisplay;
+  export let grider;
+  export let display;
+  export let rowCountNotAvailable;
+  // export let formDisplay;
   export let onNavigate;
+  export let dataEditorTypesBehaviourOverride = null;
 
   let wrapperHeight = 1;
   let wrapperWidth = 1;
   $: rowHeight = $dataGridRowHeight;
   let currentCell = [0, 0];
+  let isGridFocused = false;
 
-  const tabVisible: any = getContext('tabVisible');
+  const tabFocused: any = getContext('tabFocused');
   const domCells = {};
 
   let domFocusField;
 
-  $: if ($tabVisible && domFocusField && focusOnVisible) {
+  $: if ($tabFocused && domFocusField && focusOnVisible) {
     domFocusField.focus();
   }
 
-  $: rowData = former?.rowData;
-  $: rowStatus = former?.rowStatus;
+  $: rowData = grider?.getRowData(0);
+  $: rowStatus = grider?.getRowStatus(0);
 
   $: rowCount = Math.floor((wrapperHeight - 22) / (rowHeight + 2));
 
-  $: columnChunks = _.chunk(formDisplay.columns, rowCount) as any[][];
+  $: columnChunks = _.chunk(display?.formColumns || [], rowCount) as any[][];
 
-  $: rowCountInfo = getRowCountInfo(rowCountBefore, allRowCount);
+  $: rowCountInfo = getRowCountInfo(allRowCount, display);
 
-  function getRowCountInfo(rowCountBefore, allRowCount) {
-    if (rowData == null) return 'No data';
-    if (allRowCount == null || rowCountBefore == null) return 'Loading row count...';
-    return `Row: ${(rowCountBefore + 1).toLocaleString()} / ${allRowCount.toLocaleString()}`;
+  const settingsValue = useSettings();
+  $: gridColoringMode = $settingsValue?.['dataGrid.coloringMode'];
+
+  function getRowCountInfo(allRowCount) {
+    if (rowCountNotAvailable) {
+      return `Row: ${((display.config.formViewRecordNumber || 0) + 1).toLocaleString()} / ???`;
+    }
+    if (rowData == null) {
+      if (allRowCount != null) {
+        return `Out of bounds: ${(
+          (display.config.formViewRecordNumber || 0) + 1
+        ).toLocaleString()} / ${allRowCount.toLocaleString()}`;
+      }
+      return 'No data';
+    }
+    if (allRowCount == null || display == null) return 'Loading row count...';
+    return `Row: ${(
+      (display.config.formViewRecordNumber || 0) + 1
+    ).toLocaleString()} / ${allRowCount.toLocaleString()}`;
   }
 
-  export function getFormer() {
-    return former;
+  export function getGrider() {
+    return grider;
   }
 
   // export function getFormDisplay() {
@@ -255,33 +288,62 @@
   export function copyToClipboard() {
     const column = getCellColumn(currentCell);
     if (!column) return;
-    const text = currentCell[1] % 2 == 1 ? extractRowCopiedValue(rowData, column.uniqueName) : column.columnName;
+    const text =
+      currentCell[1] % 2 == 1
+        ? extractRowCopiedValue(rowData, column.uniqueName, display?.driver?.dataEditorTypesBehaviour)
+        : column.columnName;
     copyTextToClipboard(text);
   }
 
   export async function reconnect() {
-    await axiosInstance.post('database-connections/refresh', { conid, database });
-    formDisplay.reload();
+    await apiCall('database-connections/refresh', { conid, database });
+    display.reload();
   }
 
   export async function refresh() {
-    formDisplay.reload();
+    display.reload();
   }
 
   export function filterSelectedValue() {
-    formDisplay.filterCellValue(getCellColumn(currentCell), rowData);
+    const column = getCellColumn(currentCell);
+    if (!column || !rowData) return;
+    const value = rowData[column.uniqueName];
+    const expr = getFilterValueExpression(value, column.dataType);
+    if (expr) {
+      setConfig(cfg => ({
+        ...cfg,
+        formViewRecordNumber: 0,
+        filters: {
+          ...cfg.filters,
+          [column.uniqueName]: expr,
+        },
+        addedColumns: cfg.addedColumns.includes(column.uniqueName)
+          ? cfg.addedColumns
+          : [...cfg.addedColumns, column.uniqueName],
+      }));
+      display.reload();
+    }
   }
 
   export function addToFilter() {
-    formDisplay.addFilterColumn(getCellColumn(currentCell));
+    const column = getCellColumn(currentCell);
+    if (!column) return;
+    setConfig(cfg => ({
+      ...cfg,
+      formFilterColumns: [...(cfg.formFilterColumns || []), column.uniqueName],
+    }));
   }
 
   export const activator = createActivator('FormView', false);
 
+  export function getEditorTypes() {
+    return display?.driver?.dataEditorTypesBehaviour;
+  }
+
   const handleTableMouseDown = event => {
     if (event.target.closest('.buttonLike')) return;
     if (event.target.closest('.resizeHandleControl')) return;
-    if (event.target.closest('input')) return;
+    if (event.target.closest('.inplaceeditor-container')) return;
     if (event.target.closest('.showFormButtonMarker')) return;
 
     event.preventDefault();
@@ -294,7 +356,9 @@
     if (isDataCell(cell) && !_.isEqual(cell, $inplaceEditorState.cell) && _.isEqual(cell, currentCell)) {
       // @ts-ignore
       if (rowData) {
-        dispatchInsplaceEditor({ type: 'show', cell, selectAll: true });
+        if (!showMultilineCellEditorConditional(cell)) {
+          dispatchInsplaceEditor({ type: 'show', cell, selectAll: true });
+        }
       }
     } else if (!_.isEqual(cell, $inplaceEditorState.cell)) {
       // @ts-ignore
@@ -315,7 +379,7 @@
   function setCellValue(cell, value) {
     const column = getCellColumn(cell);
     if (!column) return;
-    former.setCellValue(column.uniqueName, value);
+    grider.setCellValue(0, column.uniqueName, value);
   }
 
   const getCellWidth = (row, col) => {
@@ -327,6 +391,7 @@
   const [inplaceEditorState, dispatchInsplaceEditor] = createReducer((state, action) => {
     switch (action.type) {
       case 'show': {
+        if (!grider.editable) return {};
         const column = getCellColumn(action.cell);
         if (!column) return state;
         if (column.uniquePath.length > 1) return state;
@@ -356,6 +421,7 @@
     return {};
   }, {});
   registerMenu(
+    { command: 'dataForm.refresh' },
     { placeTag: 'switch' },
     { command: 'dataForm.copyToClipboard' },
     { divider: true },
@@ -364,10 +430,11 @@
     { divider: true },
     { placeTag: 'save' },
     { command: 'dataForm.revertRowChanges' },
-    { command: 'dataForm.setNull' },
+    { command: 'dataForm.setNull', hideDisabled: true },
+    { command: 'dataForm.removeField', hideDisabled: true },
     { divider: true },
-    { command: 'dataForm.undo' },
-    { command: 'dataForm.redo' },
+    { command: 'dataForm.undo', hideDisabled: true },
+    { command: 'dataForm.redo', hideDisabled: true },
     { divider: true },
     { command: 'dataForm.goToFirst' },
     { command: 'dataForm.goToPrevious' },
@@ -381,6 +448,7 @@
 
     if (
       !event.ctrlKey &&
+      !event.metaKey &&
       !event.altKey &&
       ((event.keyCode >= keycodes.a && event.keyCode <= keycodes.z) ||
         (event.keyCode >= keycodes.n0 && event.keyCode <= keycodes.n9) ||
@@ -411,25 +479,44 @@
     if (event.keyCode == keycodes.numPadAdd) {
       const col = getCellColumn(currentCell);
       if (col.foreignKey) {
-        formDisplay.toggleExpandedColumn(col.uniqueName, true);
+        display.toggleExpandedColumn(col.uniqueName, true);
+        display.reload();
       }
     }
 
     if (event.keyCode == keycodes.numPadSub) {
       const col = getCellColumn(currentCell);
       if (col.foreignKey) {
-        formDisplay.toggleExpandedColumn(col.uniqueName, false);
+        display.toggleExpandedColumn(col.uniqueName, false);
+        display.reload();
       }
     }
 
-    if (event.keyCode == keycodes.f2) {
+    if (event.keyCode == keycodes.f2 || event.keyCode == keycodes.enter) {
       // @ts-ignore
       if (rowData) {
-        dispatchInsplaceEditor({ type: 'show', cell: currentCell, selectAll: true });
+        if (!showMultilineCellEditorConditional(currentCell)) {
+          dispatchInsplaceEditor({ type: 'show', cell: currentCell, selectAll: true });
+        }
       }
     }
 
     handleCursorMove(event);
+  }
+
+  function showMultilineCellEditorConditional(cell) {
+    if (!cell) return false;
+    const column = getCellColumn(cell);
+    const cellData = rowData[column.uniqueName];
+    if (shouldOpenMultilineDialog(cellData)) {
+      showModal(EditCellDataModal, {
+        value: cellData,
+        dataEditorTypesBehaviour: display?.driver?.dataEditorTypesBehaviour,
+        onSave: value => grider.setCellValue(0, column.uniqueName, value),
+      });
+      return true;
+    }
+    return false;
   }
 
   const scrollIntoView = cell => {
@@ -453,7 +540,7 @@
       columnIndex = incrementFunc(columnIndex);
       while (
         isInRange(columnIndex) &&
-        !filterName(formDisplay.config.formColumnFilterText, formDisplay.columns[columnIndex].columnName)
+        !filterName(display.config.formColumnFilterText, display.formColumns[columnIndex].columnName)
       ) {
         columnIndex = incrementFunc(columnIndex);
       }
@@ -461,16 +548,16 @@
         columnIndex = firstInRange;
         while (
           isInRange(columnIndex) &&
-          !filterName(formDisplay.config.formColumnFilterText, formDisplay.columns[columnIndex].columnName)
+          !filterName(display.config.formColumnFilterText, display.formColumns[columnIndex].columnName)
         ) {
           columnIndex = incrementFunc(columnIndex);
         }
       }
       if (!isInRange(columnIndex)) columnIndex = lastInRange;
-      return moveCurrentCell(columnIndex % formDisplay.columns.length, Math.floor(columnIndex / rowCount) * 2);
+      return moveCurrentCell(columnIndex % display.formColumns.length, Math.floor(columnIndex / rowCount) * 2);
     };
 
-    if (event.ctrlKey) {
+    if (isCtrlOrCommandKey(event)) {
       switch (event.keyCode) {
         case keycodes.leftArrow:
           return moveCurrentCell(currentCell[0], 0);
@@ -484,23 +571,23 @@
       case keycodes.rightArrow:
         return moveCurrentCell(currentCell[0], currentCell[1] + 1);
       case keycodes.upArrow:
-        if (currentCell[1] % 2 == 0 && formDisplay.config.formColumnFilterText) {
+        if (currentCell[1] % 2 == 0 && display.config.formColumnFilterText) {
           return findFilteredColumn(
             x => x - 1,
             x => x >= 0,
-            formDisplay.columns.length - 1,
+            display.formColumns.length - 1,
             0
           );
         }
 
         return moveCurrentCell(currentCell[0] - 1, currentCell[1]);
       case keycodes.downArrow:
-        if (currentCell[1] % 2 == 0 && formDisplay.config.formColumnFilterText) {
+        if (currentCell[1] % 2 == 0 && display.config.formColumnFilterText) {
           return findFilteredColumn(
             x => x + 1,
-            x => x < formDisplay.columns.length,
+            x => x < display.formColumns.length,
             0,
-            formDisplay.columns.length - 1
+            display.formColumns.length - 1
           );
         }
 
@@ -524,82 +611,86 @@
     showModal(DictionaryLookupModal, {
       conid,
       database,
-      driver: formDisplay?.driver,
+      driver: display?.driver,
       pureName: col.foreignKey.refTableName,
       schemaName: col.foreignKey.refSchemaName,
-      onConfirm: value => former.setCellValue(col.uniqueName, value),
+      onConfirm: value => grider.setCellValue(0, col.uniqueName, value),
     });
   }
 </script>
 
-<div class="outer">
+<div class="outer" class:data-grid-focused={isGridFocused}>
   <div class="wrapper" use:contextMenu={menu} bind:clientHeight={wrapperHeight} bind:clientWidth={wrapperWidth}>
     {#each columnChunks as chunk, chunkIndex}
       <table on:mousedown={handleTableMouseDown}>
         {#each chunk as col, rowIndex}
-          <tr>
+          <tr class={`coloring-mode-${gridColoringMode}`}>
             <td
               class="header-cell"
               data-row={rowIndex}
               data-col={chunkIndex * 2}
               style={rowHeight > 1 ? `height: ${rowHeight}px` : undefined}
-              class:columnFiltered={formDisplay.config.formColumnFilterText &&
-                filterName(formDisplay.config.formColumnFilterText, col.columnName)}
+              class:columnFiltered={display.config.formColumnFilterText &&
+                filterName(display.config.formColumnFilterText, col.columnName)}
               class:isSelected={currentCell[0] == rowIndex && currentCell[1] == chunkIndex * 2}
               bind:this={domCells[`${rowIndex},${chunkIndex * 2}`]}
             >
               <div class="header-cell-inner">
                 {#if col.foreignKey}
                   <FontIcon
-                    icon={plusExpandIcon(formDisplay.isExpandedColumn(col.uniqueName))}
+                    icon={plusExpandIcon(display.isExpandedColumn(col.uniqueName))}
                     on:click={e => {
                       e.stopPropagation();
-                      formDisplay.toggleExpandedColumn(col.uniqueName);
+                      display.toggleExpandedColumn(col.uniqueName);
+                      display.reload();
                     }}
                   />
                 {:else}
                   <FontIcon icon="icon invisible-box" />
                 {/if}
                 <span style={`margin-left: ${(col.uniquePath.length - 1) * 20}px`} />
-                <ColumnLabel
-                  {...col}
-                  headerText={col.columnName}
-                  extInfo={col.foreignKey ? ` -> ${col.foreignKey.refTableName}` : null}
-                />
+                <ColumnLabel {...col} headerText={col.columnName} showDataType {conid} {database} />
               </div>
             </td>
-            <DataGridCell
-              maxWidth={(wrapperWidth * 2) / 3}
-              minWidth={200}
-              {rowIndex}
-              {col}
-              {rowData}
-              colIndex={chunkIndex * 2 + 1}
-              isSelected={currentCell[0] == rowIndex && currentCell[1] == chunkIndex * 2 + 1}
-              isModifiedCell={rowStatus.modifiedFields && rowStatus.modifiedFields.has(col.uniqueName)}
-              allowHintField={!(rowStatus.modifiedFields && rowStatus.modifiedFields.has(col.uniqueName))}
-              bind:domCell={domCells[`${rowIndex},${chunkIndex * 2 + 1}`]}
-              onSetFormView={handleSetFormView}
-              showSlot={!rowData ||
-                ($inplaceEditorState.cell &&
-                  rowIndex == $inplaceEditorState.cell[0] &&
-                  chunkIndex * 2 + 1 == $inplaceEditorState.cell[1])}
-              isCurrentCell={currentCell[0] == rowIndex && currentCell[1] == chunkIndex * 2 + 1}
-              onDictionaryLookup={() => handleLookup(col)}
-            >
-              {#if rowData && $inplaceEditorState.cell && rowIndex == $inplaceEditorState.cell[0] && chunkIndex * 2 + 1 == $inplaceEditorState.cell[1]}
-                <InplaceEditor
-                  fillParent
-                  width={getCellWidth(rowIndex, chunkIndex * 2 + 1)}
-                  inplaceEditorState={$inplaceEditorState}
-                  {dispatchInsplaceEditor}
-                  cellValue={rowData[col.uniqueName]}
-                  onSetValue={value => {
-                    former.setCellValue(col.uniqueName, value);
-                  }}
-                />
-              {/if}
-            </DataGridCell>
+            {#if rowData && $inplaceEditorState.cell && rowIndex == $inplaceEditorState.cell[0] && chunkIndex * 2 + 1 == $inplaceEditorState.cell[1]}
+              <InplaceEditor
+                width={getCellWidth(rowIndex, chunkIndex * 2 + 1)}
+                driver={display?.driver}
+                inplaceEditorState={$inplaceEditorState}
+                {dispatchInsplaceEditor}
+                {dataEditorTypesBehaviourOverride}
+                cellValue={rowData[col.uniqueName]}
+                options={col.options}
+                canSelectMultipleOptions={col.canSelectMultipleOptions}
+                onSetValue={value => {
+                  grider.setCellValue(0, col.uniqueName, value);
+                }}
+              />
+            {:else}
+              <DataGridCell
+                maxWidth={(wrapperWidth * 2) / 3}
+                minWidth={200}
+                editorTypes={display?.driver?.dataEditorTypesBehaviour}
+                {rowIndex}
+                {col}
+                {rowData}
+                colIndex={chunkIndex * 2 + 1}
+                isSelected={currentCell[0] == rowIndex && currentCell[1] == chunkIndex * 2 + 1}
+                isModifiedCell={rowStatus.modifiedFields && rowStatus.modifiedFields.has(col.uniqueName)}
+                allowHintField={!(rowStatus.modifiedFields && rowStatus.modifiedFields.has(col.uniqueName))}
+                bind:domCell={domCells[`${rowIndex},${chunkIndex * 2 + 1}`]}
+                onSetFormView={handleSetFormView}
+                showSlot={!rowData ||
+                  ($inplaceEditorState.cell &&
+                    rowIndex == $inplaceEditorState.cell[0] &&
+                    chunkIndex * 2 + 1 == $inplaceEditorState.cell[1])}
+                isCurrentCell={currentCell[0] == rowIndex && currentCell[1] == chunkIndex * 2 + 1}
+                onDictionaryLookup={() => handleLookup(col)}
+                onSetValue={value => {
+                  grider.setCellValue(0, col.uniqueName, value);
+                }}
+              />
+            {/if}
           </tr>
         {/each}
       </table>
@@ -611,6 +702,10 @@
       on:focus={() => {
         activator.activate();
         invalidateCommands();
+        isGridFocused = true;
+      }}
+      on:blur={() => {
+        isGridFocused = false;
       }}
       on:keydown={handleKeyDown}
       on:copy={copyToClipboard}
@@ -655,10 +750,18 @@
   tr {
     background-color: var(--theme-bg-0);
   }
-  tr:nth-child(6n + 3) {
+  tr.coloring-mode-36:nth-child(6n + 3) {
     background-color: var(--theme-bg-1);
   }
-  tr:nth-child(6n + 6) {
+  tr.coloring-mode-36:nth-child(6n + 6) {
+    background-color: var(--theme-bg-alt);
+  }
+
+  tr.coloring-mode-2-primary:nth-child(2n + 1) {
+    background-color: var(--theme-bg-1);
+  }
+
+  tr.coloring-mode-2-secondary:nth-child(2n + 1) {
     background-color: var(--theme-bg-alt);
   }
 
@@ -671,6 +774,10 @@
     overflow: hidden;
   }
   .header-cell.isSelected {
+    background: var(--theme-bg-3);
+  }
+
+  :global(.data-grid-focused) .header-cell.isSelected {
     background: var(--theme-bg-selected);
   }
 

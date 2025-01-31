@@ -12,12 +12,15 @@
   export let grider;
   export let display;
   export let masterLoadedTime = undefined;
-  export let selectedCellsPublished;
   export let rowCountLoaded = null;
+
+  export let preprocessLoadedRow = null;
+  export let setLoadedRows = null;
+  export let isRawMode = false;
 
   // export let griderFactory;
 
-  export let loadedRows = [];
+  let loadedRows = [];
   let isLoading = false;
   let isLoadedAll = false;
   let loadedTime = new Date().getTime();
@@ -47,7 +50,6 @@
     // await new Promise(resolve => setTimeout(resolve, 5000));
 
     loadedTimeRef.set(loadStart);
-    // console.log('LOAD NEXT ROWS', loadedRows);
 
     const nextRows = await loadDataPage(
       $$props,
@@ -64,8 +66,9 @@
     if (nextRows.errorMessage) {
       errorMessage = nextRows.errorMessage;
     } else {
-      if (allRowCount == null) handleLoadRowCount();
-      loadedRows = [...loadedRows, ...nextRows];
+      if (allRowCount == null && !isRawMode) handleLoadRowCount();
+
+      loadedRows = [...loadedRows, ...(preprocessLoadedRow ? nextRows.map(preprocessLoadedRow) : nextRows)];
       isLoadedAll = nextRows.length === 0;
       //   const loadedInfo = {
       //     loadedRows: [...loadedRows, ...nextRows],
@@ -90,7 +93,7 @@
   // $: grider = griderFactory(griderProps);
 
   function handleLoadNextData() {
-    if (!isLoadedAll && !errorMessage && !grider.disableLoadNextPage) {
+    if (!isLoadedAll && !errorMessage && (!grider.disableLoadNextPage || loadedRows.length == 0)) {
       if (dataPageAvailable($$props)) {
         // If not, callbacks to load missing metadata are dispatched
         loadNextData();
@@ -118,17 +121,19 @@
       display.reload();
     }
   }
+
+  $: if (setLoadedRows) setLoadedRows(loadedRows);
 </script>
 
 <DataGridCore
-  bind:this={domGrid}
   {...$$props}
+  bind:this={domGrid}
   onLoadNextData={handleLoadNextData}
   {errorMessage}
-  {grider}
   {isLoading}
   allRowCount={rowCountLoaded || allRowCount}
   {isLoadedAll}
   {loadedTime}
-  bind:selectedCellsPublished
+  {grider}
+  {display}
 />

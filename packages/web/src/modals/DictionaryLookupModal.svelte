@@ -1,13 +1,12 @@
 <script lang="ts">
   import FormProvider from '../forms/FormProvider.svelte';
   import FormSubmit from '../forms/FormSubmit.svelte';
-  import FormStyledButton from '../elements/FormStyledButton.svelte';
+  import FormStyledButton from '../buttons/FormStyledButton.svelte';
   import ModalBase from './ModalBase.svelte';
   import { closeCurrentModal, showModal } from './modalTools';
   import DefineDictionaryDescriptionModal from './DefineDictionaryDescriptionModal.svelte';
   import ScrollableTableControl from '../elements/ScrollableTableControl.svelte';
-  import axiosInstance from '../utility/axiosInstance';
-  import { getTableInfo } from '../utility/metadataLoaders';
+  import { getTableInfo, useConnectionList, useUsedApps } from '../utility/metadataLoaders';
   import { getDictionaryDescription } from '../utility/dictionaryDescriptionTools';
   import { onMount } from 'svelte';
   import { dumpSqlSelect } from 'dbgate-sqltree';
@@ -15,6 +14,7 @@
   import SearchInput from '../elements/SearchInput.svelte';
   import FormTextField from '../forms/FormTextField.svelte';
   import _ from 'lodash';
+  import { apiCall } from '../utility/api';
 
   export let onConfirm;
   export let conid;
@@ -23,6 +23,7 @@
   export let schemaName;
   export let driver;
   export let multiselect = false;
+  export let dataType;
 
   let rows = null;
   let tableInfo;
@@ -32,6 +33,9 @@
   let search = '';
 
   let checkedKeys = [];
+
+  $: apps = useUsedApps();
+  $: connections = useConnectionList();
 
   function defineDescription() {
     showModal(DefineDictionaryDescriptionModal, {
@@ -45,7 +49,7 @@
 
   async function reload() {
     tableInfo = await getTableInfo({ conid, database, schemaName, pureName });
-    description = getDictionaryDescription(tableInfo, conid, database);
+    description = getDictionaryDescription(tableInfo, conid, database, $apps, $connections);
 
     if (!tableInfo || !description) return;
     if (tableInfo?.primaryKey?.columns?.length != 1) return;
@@ -96,26 +100,21 @@
       }
     }
 
-    // @ts-ignore
-    dumpSqlSelect(dmp, select);
-
     isLoading = true;
-    const response = await axiosInstance.request({
-      url: 'database-connections/query-data',
-      method: 'post',
-      params: {
-        conid,
-        database,
-      },
-      data: { sql: dmp.s },
+    const response = await apiCall('database-connections/sql-select', {
+      conid,
+      database,
+      select
     });
 
-    rows = response.data.rows;
+    rows = response.rows;
     isLoading = false;
   }
 
   $: {
     search;
+    $apps;
+    $connections;
     reload();
   }
 

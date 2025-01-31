@@ -1,9 +1,8 @@
 <script lang="ts">
   import _ from 'lodash';
   import ErrorInfo from '../elements/ErrorInfo.svelte';
+  import { apiOff, apiOn } from '../utility/api';
   import createRef from '../utility/createRef';
-
-  import socket from '../utility/socket';
 
   import useEffect from '../utility/useEffect';
 
@@ -11,11 +10,16 @@
 
   export let showProcedure = false;
   export let showLine = false;
+  export let showCaller = false;
   export let eventName;
   export let executeNumber;
   export let showNoMessagesAlert = false;
+  export let startLine = 0;
+  export let onChangeErrors = null;
+  export let onMessageClick = null;
 
   const cachedMessagesRef = createRef([]);
+  const lastErrorMessageCountRef = createRef(0);
 
   let displayedMessages = [];
 
@@ -30,9 +34,9 @@
 
   $: effect = useEffect(() => {
     if (eventName) {
-      socket.on(eventName, handleInfo);
+      apiOn(eventName, handleInfo);
       return () => {
-        socket.off(eventName, handleInfo);
+        apiOff(eventName, handleInfo);
       };
     }
     return () => {};
@@ -45,11 +49,26 @@
     }
   }
 
+  $: {
+    if (onChangeErrors) {
+      const errors = displayedMessages.filter(x => x.severity == 'error' && x.line != null);
+      if (lastErrorMessageCountRef.get() != errors.length) {
+        onChangeErrors(
+          errors.map(err => ({
+            ...err,
+            line: err.line == null ? null : err.line + startLine,
+          }))
+        );
+        lastErrorMessageCountRef.set(errors.length);
+      }
+    }
+  }
+
   $: $effect;
 </script>
 
 {#if showNoMessagesAlert && (!displayedMessages || displayedMessages.length == 0)}
   <ErrorInfo message="No messages" icon="img alert" />
 {:else}
-  <MessageView items={displayedMessages} on:messageclick {showProcedure} {showLine} />
+  <MessageView items={displayedMessages} {onMessageClick} {showProcedure} {showLine} {showCaller} {startLine} />
 {/if}

@@ -1,7 +1,9 @@
 <script context="module">
   function getCommandTitle(command) {
     let res = command.text;
-    if (command.keyText || command.keyTextFromGroup) res += ` (${command.keyText || command.keyTextFromGroup})`;
+    if (command.keyText || command.keyTextFromGroup) {
+      res += ` (${formatKeyText(command.keyText || command.keyTextFromGroup)})`;
+    }
     return res;
   }
 </script>
@@ -14,7 +16,8 @@
   import { activeTab, commands, commandsCustomized } from '../stores';
   import getElectron from '../utility/getElectron';
   import { useFavorites } from '../utility/metadataLoaders';
-  import ToolbarButton from './ToolbarButton.svelte';
+  import ToolbarButton from '../buttons/ToolbarButton.svelte';
+  import { formatKeyText } from '../utility/common';
 
   const electron = getElectron();
 

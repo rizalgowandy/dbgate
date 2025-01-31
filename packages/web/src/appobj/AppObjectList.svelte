@@ -1,9 +1,13 @@
 <script>
   import _ from 'lodash';
-  import { asyncFilter } from '../utility/common';
   import AppObjectGroup from './AppObjectGroup.svelte';
+  import { plusExpandIcon } from '../icons/expandIcons';
 
   import AppObjectListItem from './AppObjectListItem.svelte';
+  import { writable } from 'svelte/store';
+  import Link from '../elements/Link.svelte';
+  import { focusedConnectionOrDatabase } from '../stores';
+  import { tick } from 'svelte';
 
   export let list;
   export let module;
@@ -14,26 +18,57 @@
   export let expandIconFunc = undefined;
   export let checkedObjectsStore = null;
   export let disableContextMenu = false;
-  export let passProps;
+  export let passProps = {};
+  export let getIsExpanded = null;
+  export let setIsExpanded = null;
+  export let sortGroups = false;
+  export let groupContextMenu = null;
 
+  export let groupIconFunc = plusExpandIcon;
   export let groupFunc = undefined;
+  export let onDropOnGroup = undefined;
+  export let emptyGroupNames = [];
+  export let isExpandedBySearch = false;
 
-  $: filtered = !groupFunc
-    ? list.filter(data => {
-        const matcher = module.createMatcher && module.createMatcher(data);
-        if (matcher && !matcher(filter)) return false;
-        return true;
-      })
-    : null;
+  export let collapsedGroupNames = writable([]);
+  export let onChangeFilteredList = undefined;
 
-  $: childrenMatched = !groupFunc
-    ? list.filter(data => {
-        const matcher = module.createChildMatcher && module.createChildMatcher(data);
-        if (matcher && !matcher(filter)) return false;
-        return true;
-      })
-    : null;
+  let expandLimited = false;
 
+  $: matcher = module.createMatcher && module.createMatcher(filter, passProps?.searchSettings);
+
+  $: dataLabeled = _.compact(
+    (list || []).map(data => {
+      const matchResult = matcher ? matcher(data) : true;
+
+      let isMatched = true;
+      let isMainMatched = true;
+      let isChildMatched = true;
+
+      if (matchResult == false) {
+        isMatched = false;
+        isChildMatched = false;
+        isMainMatched = false;
+      } else if (matchResult == 'child') {
+        isMainMatched = false;
+      } else if (matchResult == 'main') {
+        isChildMatched = false;
+      } else if (matchResult == 'none') {
+        isMatched = false;
+        isChildMatched = false;
+        isMainMatched = false;
+      } else if (matchResult == 'both') {
+        isChildMatched = !module.disableShowChildrenWithParentMatch;
+      }
+
+      const group = groupFunc ? groupFunc(data) : undefined;
+      return { group, data, isMatched, isChildMatched, isMainMatched };
+    })
+  );
+
+  $: filtered = dataLabeled.filter(x => x.isMatched).map(x => x.data);
+  $: childrenMatched = dataLabeled.filter(x => x.isChildMatched).map(x => x.data);
+  $: mainMatched = dataLabeled.filter(x => x.isMainMatched).map(x => x.data);
 
   // let filtered = [];
 
@@ -49,27 +84,45 @@
   //   }
   // }
 
-  $: listGrouped = groupFunc
-    ? _.compact(
-        (list || []).map(data => {
-          const matcher = module.createMatcher && module.createMatcher(data);
-          const isMatched = matcher && !matcher(filter) ? false : true;
-          const group = groupFunc(data);
-          return { group, data, isMatched };
-        })
-      )
-    : null;
+  function extendGroups(base, emptyList) {
+    const res = {
+      ...base,
+    };
+    for (const item of emptyList) {
+      if (res[item]) continue;
+      res[item] = [];
+    }
+    return res;
+  }
 
-  $: groups = groupFunc ? _.groupBy(listGrouped, 'group') : null;
+  function setExpandLimited() {
+    expandLimited = true;
+  }
+
+  $: groups = groupFunc ? extendGroups(_.groupBy(dataLabeled, 'group'), emptyGroupNames) : null;
+
+  $: listLimited = isExpandedBySearch && !expandLimited ? filtered.slice(0, filter.trim().length < 3 ? 1 : 3) : list;
+  $: isListLimited = isExpandedBySearch && listLimited.length < filtered.length;
+  $: listMissingItems = isListLimited ? filtered.slice(listLimited.length) : [];
+
+  $: if (
+    $focusedConnectionOrDatabase &&
+    listMissingItems.some(
+      x => $focusedConnectionOrDatabase.conid == x?.connection?._id && $focusedConnectionOrDatabase.database == x?.name
+    )
+  ) {
+    tick().then(setExpandLimited);
+  }
 </script>
 
 {#if groupFunc}
-  {#each _.keys(groups) as group}
+  {#each sortGroups ? _.sortBy(_.keys(groups)) : _.keys(groups) as group}
     <AppObjectGroup
       {group}
       {module}
       items={groups[group]}
       {expandIconFunc}
+      {groupIconFunc}
       {isExpandable}
       {subItemsComponent}
       {checkedObjectsStore}
@@ -77,10 +130,15 @@
       {disableContextMenu}
       {filter}
       {passProps}
+      {getIsExpanded}
+      {setIsExpanded}
+      {onDropOnGroup}
+      {groupContextMenu}
+      {collapsedGroupNames}
     />
   {/each}
 {:else}
-  {#each list as data}
+  {#each listLimited as data}
     <AppObjectListItem
       isHidden={!filtered.includes(data)}
       {module}
@@ -93,8 +151,20 @@
       {checkedObjectsStore}
       {disableContextMenu}
       {filter}
-      isExpandedBySearch={childrenMatched.includes(data)}
+      isExpandedBySearch={filter && childrenMatched.includes(data)}
+      isMainMatched={filter && mainMatched.includes(data)}
       {passProps}
+      {getIsExpanded}
+      {setIsExpanded}
     />
   {/each}
+  {#if isListLimited}
+    <div class="ml-2">
+      <Link
+        onClick={() => {
+          expandLimited = true;
+        }}>Show next {filtered.length - listLimited.length}</Link
+      >
+    </div>
+  {/if}
 {/if}

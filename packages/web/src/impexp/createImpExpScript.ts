@@ -1,9 +1,10 @@
 import _ from 'lodash';
-import ScriptWriter from './ScriptWriter';
+import { ScriptWriter, ScriptWriterJson } from 'dbgate-tools';
 import getAsArray from '../utility/getAsArray';
 import { getConnectionInfo } from '../utility/metadataLoaders';
 import { findEngineDriver, findObjectLike } from 'dbgate-tools';
 import { findFileFormat } from '../plugins/fileformats';
+import { getCurrentConfig } from '../stores';
 
 export function getTargetName(extensions, source, values) {
   const key = `targetName_${source}`;
@@ -33,17 +34,30 @@ function extractDriverApiParameters(values, direction, driver) {
   return _.fromPairs(pairs);
 }
 
+export function extractShellConnection(connection, database) {
+  const config = getCurrentConfig();
+
+  return config.allowShellConnection
+    ? {
+        ..._.omitBy(
+          _.omit(connection, ['_id', 'displayName', 'databases', 'connectionColor', 'status', 'unsaved']),
+          v => !v
+        ),
+        database,
+      }
+    : {
+        _id: connection._id,
+        engine: connection.engine,
+        database,
+      };
+}
+
 async function getConnection(extensions, storageType, conid, database) {
   if (storageType == 'database' || storageType == 'query') {
     const conn = await getConnectionInfo({ conid });
     const driver = findEngineDriver(conn, extensions);
-    return [
-      {
-        ..._.omit(conn, ['_id', 'displayName']),
-        database,
-      },
-      driver,
-    ];
+    const connection = extractShellConnection(conn, database);
+    return [connection, driver];
   }
   return [null, null];
 }
@@ -67,7 +81,8 @@ function getSourceExpr(extensions, sourceName, values, sourceConnection, sourceD
       {
         connection: sourceConnection,
         ...extractDriverApiParameters(values, 'source', sourceDriver),
-        sql: values.sourceSql,
+        queryType: values.sourceQueryType,
+        query: values.sourceQueryType == 'json' ? JSON.parse(values.sourceQuery) : values.sourceQuery,
       },
     ];
   }
@@ -110,6 +125,11 @@ function getFlagsFroAction(action) {
       return {
         createIfNotExists: true,
         truncate: true,
+      };
+    case 'appendData':
+      return {
+        createIfNotExists: false,
+        truncate: false,
       };
   }
 
@@ -160,8 +180,27 @@ function getTargetExpr(extensions, sourceName, values, targetConnection, targetD
   throw new Error(`Unknown target storage type: ${targetStorageType}`);
 }
 
-export default async function createImpExpScript(extensions, values, addEditorInfo = true) {
-  const script = new ScriptWriter(values.startVariableIndex || 0);
+export function normalizeExportColumnMap(colmap) {
+  if (!colmap) {
+    return null;
+  }
+  if (!colmap.find(x => !x.ignore)) {
+    // all values are ignored, ignore column map
+    return null;
+  }
+  colmap = colmap.filter(x => !x.skip);
+  if (colmap.length > 0) {
+    return colmap.map(x => _.omit(x, ['ignore']));
+  }
+  return null;
+}
+
+export default async function createImpExpScript(extensions, values, forceScript = false) {
+  const config = getCurrentConfig();
+  const script =
+    config.allowShellScripting || forceScript
+      ? new ScriptWriter(values.startVariableIndex || 0)
+      : new ScriptWriterJson(values.startVariableIndex || 0);
 
   const [sourceConnection, sourceDriver] = await getConnection(
     extensions,
@@ -186,44 +225,39 @@ export default async function createImpExpScript(extensions, values, addEditorIn
     // @ts-ignore
     script.assign(targetVar, ...getTargetExpr(extensions, sourceName, values, targetConnection, targetDriver));
 
-    script.copyStream(sourceVar, targetVar);
-    script.put();
-  }
-  if (addEditorInfo) {
-    script.comment('@ImportExportConfigurator');
-    script.comment(JSON.stringify(values));
+    const colmap = normalizeExportColumnMap(values[`columns_${sourceName}`]);
+
+    let colmapVar = null;
+    if (colmap) {
+      colmapVar = script.allocVariable();
+      script.assignValue(colmapVar, colmap);
+    }
+
+    script.copyStream(sourceVar, targetVar, colmapVar);
+    script.endLine();
   }
   return script.getScript(values.schedule);
 }
 
 export function getActionOptions(extensions, source, values, targetDbinfo) {
   const res = [];
-  const targetName = getTargetName(extensions, source, values);
   if (values.targetStorageType == 'database') {
-    let existing = findObjectLike(
-      { schemaName: values.targetSchemaName, pureName: targetName },
-      targetDbinfo,
-      'tables'
-    );
-    if (existing) {
-      res.push({
-        label: 'Append data',
-        value: 'appendData',
-      });
-      res.push({
-        label: 'Truncate and import',
-        value: 'truncate',
-      });
-      res.push({
-        label: 'Drop and create table',
-        value: 'dropCreateTable',
-      });
-    } else {
-      res.push({
-        label: 'Create table',
-        value: 'createTable',
-      });
-    }
+    res.push({
+      label: 'Create table/append',
+      value: 'createTable',
+    });
+    res.push({
+      label: 'Append data',
+      value: 'appendData',
+    });
+    res.push({
+      label: 'Truncate and import',
+      value: 'truncate',
+    });
+    res.push({
+      label: 'Drop and create table',
+      value: 'dropCreateTable',
+    });
   } else {
     res.push({
       label: 'Create file',

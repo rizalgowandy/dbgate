@@ -2,7 +2,7 @@
   import InputTextModal from '../modals/InputTextModal.svelte';
 
   import { showModal } from '../modals/modalTools';
-  import axiosInstance from '../utility/axiosInstance';
+  import { apiCall } from '../utility/api';
 
   import { useArchiveFolders } from '../utility/metadataLoaders';
   import { getFormContext } from './FormProviderCore.svelte';
@@ -22,6 +22,7 @@
       label: folder.name,
     })),
     ...additionalFolders
+      .filter(x => x != '@create')
       .filter(x => !($folders || []).find(y => y.name == x))
       .map(folder => ({
         value: folder,
@@ -34,7 +35,7 @@
   ];
 
   const createOption = folder => {
-    axiosInstance.post('archive/create-folder', { folder });
+    apiCall('archive/create-folder', { folder });
     setFieldValue(name, folder);
   };
 

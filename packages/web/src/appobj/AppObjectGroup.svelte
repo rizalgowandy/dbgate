@@ -4,18 +4,24 @@
   import { plusExpandIcon } from '../icons/expandIcons';
 
   import FontIcon from '../icons/FontIcon.svelte';
+  import contextMenu from '../utility/contextMenu';
 
   import AppObjectListItem from './AppObjectListItem.svelte';
 
   export let group;
   export let groupFunc;
   export let items;
+  export let groupIconFunc = plusExpandIcon;
   export let module;
   export let checkedObjectsStore = null;
   export let disableContextMenu = false;
   export let passProps;
+  export let onDropOnGroup = undefined;
+  export let groupContextMenu = null;
+  export let collapsedGroupNames;
+  export let filter = undefined;
 
-  let isExpanded = true;
+  $: isExpanded = !$collapsedGroupNames.includes(group);
 
   $: filtered = items.filter(x => x.isMatched);
   $: countText = filtered.length < items.length ? `${filtered.length}/${items.length}` : `${items.length}`;
@@ -33,11 +39,28 @@
       return res;
     });
   }
+
+  function handleDrop(e) {
+    var data = e.dataTransfer.getData('app_object_drag_data');
+    if (data && onDropOnGroup) {
+      e.stopPropagation();
+      onDropOnGroup(data, group);
+    }
+  }
 </script>
 
-<div class="group" on:click={() => (isExpanded = !isExpanded)}>
+<div
+  class="group"
+  on:click={() =>
+    collapsedGroupNames.update(names => {
+      if (names.includes(group)) return names.filter(x => x != group);
+      return [...names, group];
+    })}
+  on:drop={handleDrop}
+  use:contextMenu={groupContextMenu ? () => groupContextMenu(group) : null}
+>
   <span class="expand-icon">
-    <FontIcon icon={plusExpandIcon(isExpanded)} />
+    <FontIcon icon={groupIconFunc(isExpanded)} />
   </span>
 
   {group}
@@ -53,18 +76,23 @@
     </div>
   {/if}
 
-  {#each items as item}
-    <AppObjectListItem
-      isHidden={!item.isMatched}
-      {...$$restProps}
-      {module}
-      data={item.data}
-      {checkedObjectsStore}
-      on:objectClick
-      {disableContextMenu}
-      {passProps}
-    />
-  {/each}
+  <div on:drop={handleDrop}>
+    {#each items as item}
+      <AppObjectListItem
+        isHidden={!item.isMatched}
+        {...$$restProps}
+        {module}
+        data={item.data}
+        {checkedObjectsStore}
+        on:objectClick
+        {disableContextMenu}
+        {passProps}
+        isExpandedBySearch={filter && item.isChildMatched}
+        {filter}
+        isMainMatched={item.isMainMatched}
+      />
+    {/each}
+  </div>
 {/if}
 
 <style>

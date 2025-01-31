@@ -17,6 +17,7 @@ const fileFormat = {
       name: 'delimiter',
       label: 'Delimiter',
       options: [
+        { name: 'Auto-detect', value: '' },
         { name: 'Comma (,)', value: ',' },
         { name: 'Semicolon (;)', value: ';' },
         { name: 'Tab', value: '\t' },
@@ -57,7 +58,7 @@ export default {
       }),
     },
     {
-      label: 'CSV file (semicolor separated)',
+      label: 'CSV file (semicolon separated)',
       extension: 'csv',
       createWriter: (fileName) => ({
         functionName: 'writer@dbgate-plugin-csv',

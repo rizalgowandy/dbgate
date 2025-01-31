@@ -2,16 +2,12 @@
   import _ from 'lodash';
   import { writable } from 'svelte/store';
 
-  import FormStyledButton from '../elements/FormStyledButton.svelte';
-  import InlineButton from '../elements/InlineButton.svelte';
-
-  import FormProvider from '../forms/FormProvider.svelte';
+  import FormStyledButton from '../buttons/FormStyledButton.svelte';
   import FormProviderCore from '../forms/FormProviderCore.svelte';
   import FormSubmit from '../forms/FormSubmit.svelte';
   import FormTextField from '../forms/FormTextField.svelte';
-  import FontIcon from '../icons/FontIcon.svelte';
   import { commandsSettings } from '../stores';
-  import axiosInstance from '../utility/axiosInstance';
+  import { apiCall } from '../utility/api';
   import KeyboardModal from './KeyboardModal.svelte';
   import ModalBase from './ModalBase.svelte';
   import { closeCurrentModal, showModal } from './modalTools';
@@ -34,7 +30,12 @@
 
     <div class="row">
       <FormTextField label="Keyboard shortcut" name="keyText" templateProps={{ noMargin: true }} focused />
-      <FormStyledButton type="button" value="Keyboard" on:click={handleKeyboard} />
+      <FormStyledButton
+        type="button"
+        value="Keyboard"
+        on:click={handleKeyboard}
+        data-testid="CommandModal_keyboardButton"
+      />
     </div>
 
     <svelte:fragment slot="footer">
@@ -42,7 +43,7 @@
         value="OK"
         on:click={e => {
           closeCurrentModal();
-          axiosInstance.post('config/update-settings', {
+          apiCall('config/update-settings', {
             commands: {
               ...$commandsSettings,
               [command.id]: {
@@ -58,7 +59,7 @@
         value="Reset"
         on:click={() => {
           closeCurrentModal();
-          axiosInstance.post('config/update-settings', {
+          apiCall('config/update-settings', {
             commands: _.omit($commandsSettings, [command.id]),
           });
         }}

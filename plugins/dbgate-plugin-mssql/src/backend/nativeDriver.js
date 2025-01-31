@@ -1,7 +1,7 @@
 const _ = require('lodash');
 const stream = require('stream');
 const makeUniqueColumnNames = require('./makeUniqueColumnNames');
-let msnodesqlv8;
+const { extractDbNameFromComposite } = global.DBGATE_PACKAGES['dbgate-tools'];
 
 // async function nativeQueryCore(pool, sql, options) {
 //   if (sql == null) {
@@ -19,6 +19,14 @@ let msnodesqlv8;
 //     });
 //   });
 // }
+
+let msnodesqlv8Value;
+function getMsnodesqlv8() {
+  if (!msnodesqlv8Value) {
+    msnodesqlv8Value = require('msnodesqlv8');
+  }
+  return msnodesqlv8Value;
+}
 
 function extractNativeColumns(meta) {
   const res = meta.map(col => {
@@ -49,13 +57,12 @@ async function connectWithDriver({ server, port, user, password, database, authT
   connectionString += `;Driver={${driver}}`;
   if (authType == 'sspi') connectionString += ';Trusted_Connection=Yes';
   else connectionString += `;UID=${user};PWD=${password}`;
-  if (database) connectionString += `;Database=${database}`;
+  if (database) connectionString += `;Database=${extractDbNameFromComposite(database)}`;
   return new Promise((resolve, reject) => {
-    msnodesqlv8.open(connectionString, (err, conn) => {
+    getMsnodesqlv8().open(connectionString, (err, conn) => {
       if (err) {
         reject(err);
       } else {
-        conn._connectionType = 'msnodesqlv8';
         resolve(conn);
       }
     });
@@ -80,7 +87,7 @@ async function nativeConnect(connection) {
   }
 }
 
-async function nativeQueryCore(pool, sql, options) {
+async function nativeQueryCore(dbhan, sql, options) {
   if (sql == null) {
     return Promise.resolve({
       rows: [],
@@ -90,7 +97,7 @@ async function nativeQueryCore(pool, sql, options) {
   return new Promise((resolve, reject) => {
     let columns = null;
     let currentRow = null;
-    const q = pool.query(sql);
+    const q = dbhan.client.query(sql);
     const rows = [];
 
     q.on('meta', meta => {
@@ -120,7 +127,7 @@ async function nativeQueryCore(pool, sql, options) {
   });
 }
 
-async function nativeReadQuery(pool, sql, structure) {
+async function nativeReadQuery(dbhan, sql, structure) {
   const pass = new stream.PassThrough({
     objectMode: true,
     highWaterMark: 100,
@@ -128,7 +135,7 @@ async function nativeReadQuery(pool, sql, structure) {
 
   let columns = null;
   let currentRow = null;
-  const q = pool.query(sql);
+  const q = dbhan.client.query(sql);
 
   q.on('meta', meta => {
     columns = extractNativeColumns(meta);
@@ -160,7 +167,7 @@ async function nativeReadQuery(pool, sql, structure) {
   return pass;
 }
 
-async function nativeStream(pool, sql, options) {
+async function nativeStream(dbhan, sql, options) {
   const handleInfo = info => {
     const { message, lineNumber, procName } = info;
     options.info({
@@ -184,7 +191,7 @@ async function nativeStream(pool, sql, options) {
 
   let columns = null;
   let currentRow = null;
-  const q = pool.query(sql);
+  const q = dbhan.client.query(sql);
 
   q.on('meta', meta => {
     if (currentRow) options.row(currentRow);
@@ -217,16 +224,9 @@ async function nativeStream(pool, sql, options) {
   });
 }
 
-const initialize = dbgateEnv => {
-  if (dbgateEnv.nativeModules && dbgateEnv.nativeModules.msnodesqlv8) {
-    msnodesqlv8 = dbgateEnv.nativeModules.msnodesqlv8();
-  }
-};
-
 module.exports = {
   nativeConnect,
   nativeQueryCore,
   nativeReadQuery,
   nativeStream,
-  initialize,
 };

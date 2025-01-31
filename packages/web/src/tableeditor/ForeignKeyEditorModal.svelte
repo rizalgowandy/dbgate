@@ -1,18 +1,11 @@
 <script lang="ts">
-  import FormStyledButton from '../elements/FormStyledButton.svelte';
+  import FormStyledButton from '../buttons/FormStyledButton.svelte';
   import uuidv1 from 'uuid/v1';
-
-  import FormSelectField from '../forms/FormSelectField.svelte';
-  import FormTextField from '../forms/FormTextField.svelte';
-  import FormCheckboxField from '../forms/FormCheckboxField.svelte';
 
   import FormProvider from '../forms/FormProvider.svelte';
   import FormSubmit from '../forms/FormSubmit.svelte';
   import ModalBase from '../modals/ModalBase.svelte';
   import { closeCurrentModal } from '../modals/modalTools';
-  import ElectronFilesInput from '../impexp/ElectronFilesInput.svelte';
-  import DropDownButton from '../elements/DropDownButton.svelte';
-  import DataTypeEditor from './DataTypeEditor.svelte';
   import {
     editorAddConstraint,
     editorDeleteConstraint,
@@ -60,6 +53,8 @@
       updateAction: _.startCase(updateAction).toUpperCase(),
     };
   }
+
+  $: isReadOnly = !setTableInfo;
 </script>
 
 <FormProvider>
@@ -70,7 +65,12 @@
       <div class="row">
         <div class="label col-3">Constraint name</div>
         <div class="col-9">
-          <TextField value={constraintName} on:input={e => (constraintName = e.target['value'])} focused />
+          <TextField
+            value={constraintName}
+            on:input={e => (constraintName = e.target['value'])}
+            focused
+            disabled={isReadOnly}
+          />
         </div>
       </div>
 
@@ -81,10 +81,11 @@
             value={fullNameToString({ pureName: refTableName, schemaName: refSchemaName })}
             isNative
             notSelected
-            options={(dbInfo?.tables || []).map(tbl => ({
+            options={_.sortBy(dbInfo?.tables || [], ['schemaName', 'pureName']).map(tbl => ({
               label: fullNameToLabel(tbl),
               value: fullNameToString(tbl),
             }))}
+            disabled={isReadOnly}
             on:change={e => {
               if (e.detail) {
                 const name = fullNameFromString(e.detail);
@@ -104,6 +105,7 @@
             isNative
             notSelected
             options={foreignKeyActionsOptions}
+            disabled={isReadOnly}
             on:change={e => {
               updateAction = e.detail || null;
             }}
@@ -119,6 +121,7 @@
             isNative
             notSelected
             options={foreignKeyActionsOptions}
+            disabled={isReadOnly}
             on:change={e => {
               deleteAction = e.detail || null;
             }}
@@ -143,6 +146,7 @@
                 value={column.columnName}
                 isNative
                 notSelected
+                disabled={isReadOnly}
                 options={tableInfo.columns.map(col => ({
                   label: col.columnName,
                   value: col.columnName,
@@ -161,6 +165,7 @@
                 value={column.refColumnName}
                 isNative
                 notSelected
+                disabled={isReadOnly}
                 options={(refTableInfo?.columns || []).map(col => ({
                   label: col.columnName,
                   value: col.columnName,
@@ -176,6 +181,7 @@
           <div class="col-2 button">
             <FormStyledButton
               value="Delete"
+              disabled={isReadOnly}
               on:click={e => {
                 const x = [...columns];
                 x.splice(index, 1);
@@ -189,6 +195,7 @@
       <FormStyledButton
         type="button"
         value="Add column"
+        disabled={isReadOnly}
         on:click={() => {
           columns = [...columns, {}];
         }}
@@ -197,7 +204,8 @@
 
     <svelte:fragment slot="footer">
       <FormSubmit
-        value={'Save'}
+        value="Save"
+        disabled={isReadOnly}
         on:click={() => {
           closeCurrentModal();
           if (constraintInfo) {
@@ -212,6 +220,7 @@
       {#if constraintInfo}
         <FormStyledButton
           type="button"
+          disabled={isReadOnly}
           value="Remove"
           on:click={() => {
             closeCurrentModal();

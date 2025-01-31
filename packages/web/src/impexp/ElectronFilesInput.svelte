@@ -9,7 +9,7 @@
 </script>
 
 <script lang="ts">
-  import FormStyledButton from '../elements/FormStyledButton.svelte';
+  import FormStyledButton from '../buttons/FormStyledButton.svelte';
   import LoadingInfo from '../elements/LoadingInfo.svelte';
   import { getFormContext } from '../forms/FormProviderCore.svelte';
   import { findFileFormat } from '../plugins/fileformats';
@@ -19,11 +19,11 @@
 
   let isLoading = false;
 
-  const electron = getElectron();
   const { values } = getFormContext();
 
   const handleClick = async () => {
-    const files = electron.remote.dialog.showOpenDialogSync(electron.remote.getCurrentWindow(), {
+    const electron = getElectron();
+    const files = await electron.showOpenDialog({
       properties: ['openFile', 'multiSelections'],
       filters: getFileFilters($extensions, $values.sourceStorageType),
     });

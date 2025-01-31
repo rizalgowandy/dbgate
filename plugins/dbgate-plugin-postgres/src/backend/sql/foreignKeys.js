@@ -1,24 +1,20 @@
 module.exports = `
-select 
-	fk.constraint_name as "constraint_name",
-	fk.constraint_schema as "constraint_schema",
-	base.table_name as "pure_name",
-	base.table_schema as "schema_name",
-	fk.update_rule as "update_action",
-	fk.delete_rule as "delete_action",
-	ref.table_name as "ref_table_name",
-	ref.table_schema as "ref_schema_name",
-	basecol.column_name as "column_name",
-	refcol.column_name as "ref_column_name"
-from information_schema.referential_constraints fk
-inner join information_schema.table_constraints base on fk.constraint_name = base.constraint_name and fk.constraint_schema = base.constraint_schema
-inner join information_schema.table_constraints ref on fk.unique_constraint_name = ref.constraint_name and fk.unique_constraint_schema = ref.constraint_schema #REFTABLECOND#
-inner join information_schema.key_column_usage basecol on base.table_name = basecol.table_name and base.constraint_name = basecol.constraint_name
-inner join information_schema.key_column_usage refcol on ref.table_name = refcol.table_name and ref.constraint_name = refcol.constraint_name and basecol.ordinal_position = refcol.ordinal_position
-where 
-		base.table_schema <> 'information_schema' 
-		and base.table_schema <> 'pg_catalog' 
-		and base.table_schema !~ '^pg_toast' 
-		and ('tables:' || base.table_schema || '.' || base.table_name) =OBJECT_ID_CONDITION
-order by basecol.ordinal_position
+SELECT 
+    nsp.nspname AS table_schema,
+    rel.relname AS table_name,
+    con.conname AS constraint_name,
+    nsp2.nspname AS ref_table_schema,
+    rel2.relname AS ref_table_name,
+    conpk.conname AS unique_constraint_name
+FROM pg_constraint con
+JOIN pg_class rel ON rel.oid = con.conrelid
+JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+JOIN pg_class rel2 ON rel2.oid = con.confrelid
+JOIN pg_namespace nsp2 ON nsp2.oid = rel2.relnamespace
+JOIN pg_constraint conpk 
+    ON conpk.conrelid = con.confrelid 
+   AND conpk.conkey = con.confkey
+   AND conpk.contype IN ('p','u')  -- 'p' = primary key, 'u' = unique constraint
+WHERE con.contype = 'f' AND ('tables:' || nsp.nspname || '.' || rel.relname) =OBJECT_ID_CONDITION AND nsp.nspname =SCHEMA_NAME_CONDITION
+;
 `;

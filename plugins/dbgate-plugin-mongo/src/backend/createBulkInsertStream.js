@@ -1,8 +1,13 @@
 const ObjectId = require('mongodb').ObjectId;
+const { getLogger } = global.DBGATE_PACKAGES['dbgate-tools'];
+const { EJSON } = require('bson');
 
-function createBulkInsertStream(driver, stream, pool, name, options) {
+const logger = getLogger('mongoBulkInsert');
+
+
+function createBulkInsertStream(driver, stream, dbhan, name, options) {
   const collectionName = name.pureName;
-  const db = pool.__getDatabase();
+  const db = dbhan.getDatabase();
 
   const writable = new stream.Writable({
     objectMode: true,
@@ -14,29 +19,24 @@ function createBulkInsertStream(driver, stream, pool, name, options) {
   writable.addRow = (row) => {
     if (!writable.wasHeader) {
       writable.wasHeader = true;
-      if (
-        row.__isStreamHeader ||
-        // TODO remove isArray test
-        Array.isArray(row.columns)
-      )
-        return;
+      if (row.__isStreamHeader) return;
     }
     if (options.createStringId) {
       row = {
         _id: new ObjectId().toString(),
         ...row,
-      }
+      };
     }
-    writable.buffer.push(row);
+    writable.buffer.push(EJSON.deserialize(row));
   };
 
   writable.checkStructure = async () => {
     if (options.dropIfExists) {
-      console.log(`Dropping collection ${collectionName}`);
+      logger.info(`Dropping collection ${collectionName}`);
       await db.collection(collectionName).drop();
     }
     if (options.truncate) {
-      console.log(`Truncating collection ${collectionName}`);
+      logger.info(`Truncating collection ${collectionName}`);
       await db.collection(collectionName).deleteMany({});
     }
   };

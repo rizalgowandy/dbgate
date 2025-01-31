@@ -16,7 +16,7 @@
     const connProps: any = {};
     let tooltip = undefined;
 
-    const resp = await axiosInstance.post('files/load', {
+    const resp = await apiCall('files/load', {
       folder: 'archive:' + folderName,
       file: fileName + '.' + fileType,
       format: 'text',
@@ -36,12 +36,15 @@
           ...connProps,
         },
       },
-      { editor: resp.data }
+      { editor: resp }
     );
   }
 
   export const extractKey = data => data.fileName;
-  export const createMatcher = ({ fileName }) => filter => filterName(filter, fileName);
+  export const createMatcher =
+    filter =>
+    ({ fileName }) =>
+      filterName(filter, fileName);
   const ARCHIVE_ICONS = {
     'table.yaml': 'img table',
     'view.sql': 'img view',
@@ -51,11 +54,9 @@
     'matview.sql': 'img view',
   };
 
-  function getArchiveIcon(archiveFilesAsDataSheets, data) {
+  function getArchiveIcon(data) {
     if (data.fileType == 'jsonl') {
-      return isArchiveFileMarkedAsDataSheet(archiveFilesAsDataSheets, data.folderName, data.fileName)
-        ? 'img free-table'
-        : 'img archive';
+      return 'img archive';
     }
     return ARCHIVE_ICONS[data.fileType];
   }
@@ -64,24 +65,18 @@
 <script lang="ts">
   import _ from 'lodash';
   import { filterName } from 'dbgate-tools';
-  import ImportExportModal from '../modals/ImportExportModal.svelte';
   import { showModal } from '../modals/modalTools';
 
-  import { archiveFilesAsDataSheets, currentArchive, extensions, getCurrentDatabase } from '../stores';
+  import { getExtensions } from '../stores';
 
-  import axiosInstance from '../utility/axiosInstance';
   import createQuickExportMenu from '../utility/createQuickExportMenu';
-  import { exportElectronFile } from '../utility/exportElectronFile';
+  import { exportQuickExportFile } from '../utility/exportFileTools';
   import openNewTab from '../utility/openNewTab';
   import AppObjectCore from './AppObjectCore.svelte';
-  import getConnectionLabel from '../utility/getConnectionLabel';
   import InputTextModal from '../modals/InputTextModal.svelte';
   import ConfirmModal from '../modals/ConfirmModal.svelte';
-  import {
-    isArchiveFileMarkedAsDataSheet,
-    markArchiveFileAsDataSheet,
-    markArchiveFileAsReadonly,
-  } from '../utility/archiveTools';
+  import { apiCall } from '../utility/api';
+  import { openImportExportTab } from '../utility/importExportTools';
 
   export let data;
 
@@ -91,7 +86,7 @@
       label: 'New file name',
       header: 'Rename file',
       onConfirm: newFile => {
-        axiosInstance.post('archive/rename-file', {
+        apiCall('archive/rename-file', {
           file: data.fileName,
           folder: data.folderName,
           fileType: data.fileType,
@@ -105,7 +100,7 @@
     showModal(ConfirmModal, {
       message: `Really delete file ${data.fileName}?`,
       onConfirm: () => {
-        axiosInstance.post('archive/delete-file', {
+        apiCall('archive/delete-file', {
           file: data.fileName,
           folder: data.folderName,
           fileType: data.fileType,
@@ -113,36 +108,12 @@
       },
     });
   };
-  const handleOpenRead = () => {
-    markArchiveFileAsReadonly(data.folderName, data.fileName);
+  const handleOpenArchive = () => {
     openArchive(data.fileName, data.folderName);
-  };
-  const handleOpenWrite = () => {
-    markArchiveFileAsDataSheet(data.folderName, data.fileName);
-    openNewTab({
-      title: data.fileName,
-      icon: 'img free-table',
-      tabComponent: 'FreeTableTab',
-      props: {
-        initialArgs: {
-          functionName: 'archiveReader',
-          props: {
-            fileName: data.fileName,
-            folderName: data.folderName,
-          },
-        },
-        archiveFile: data.fileName,
-        archiveFolder: data.folderName,
-      },
-    });
   };
   const handleClick = () => {
     if (data.fileType == 'jsonl') {
-      if (isArchiveFileMarkedAsDataSheet($archiveFilesAsDataSheets, data.folderName, data.fileName)) {
-        handleOpenWrite();
-      } else {
-        handleOpenRead();
-      }
+      handleOpenArchive();
     }
     if (data.fileType.endsWith('.sql')) {
       handleOpenSqlFile();
@@ -157,41 +128,75 @@
   const handleOpenYamlFile = () => {
     openTextFile(data.fileName, data.fileType, data.folderName, 'YamlEditorTab', 'img yaml');
   };
+  const handleOpenJsonLinesText = () => {
+    openTextFile(data.fileName, data.fileType, data.folderName, 'JsonLinesEditorTab', 'img json');
+  };
 
   function createMenu() {
     return [
-      data.fileType == 'jsonl' && { text: 'Open (readonly)', onClick: handleOpenRead },
-      data.fileType == 'jsonl' && { text: 'Open as data sheet', onClick: handleOpenWrite },
+      data.fileType == 'jsonl' && { text: 'Open', onClick: handleOpenArchive },
+      data.fileType == 'jsonl' && { text: 'Open in text editor', onClick: handleOpenJsonLinesText },
       { text: 'Delete', onClick: handleDelete },
       { text: 'Rename', onClick: handleRename },
       data.fileType == 'jsonl' &&
-        createQuickExportMenu($extensions, fmt => async () => {
-          exportElectronFile(
-            data.fileName,
-            {
-              functionName: 'archiveReader',
-              props: {
-                fileName: data.fileName,
-                folderName: data.folderName,
+        createQuickExportMenu(
+          fmt => async () => {
+            exportQuickExportFile(
+              data.fileName,
+              {
+                functionName: 'archiveReader',
+                props: {
+                  fileName: data.fileName,
+                  folderName: data.folderName,
+                },
               },
+              fmt
+            );
+          },
+          {
+            text: 'Export',
+            onClick: () => {
+              openImportExportTab({
+                sourceStorageType: 'archive',
+                sourceArchiveFolder: data.folderName,
+                sourceList: [data.fileName],
+              });
+
+              // showModal(ImportExportModal, {
+              //   initialValues: {
+              //     sourceStorageType: 'archive',
+              //     sourceArchiveFolder: data.folderName,
+              //     sourceList: [data.fileName],
+              //   },
+              // });
             },
-            fmt
-          );
-        }),
-      data.fileType == 'jsonl' && {
-        text: 'Export',
-        onClick: () => {
-          showModal(ImportExportModal, {
-            initialValues: {
-              sourceStorageType: 'archive',
-              sourceArchiveFolder: data.folderName,
-              sourceList: [data.fileName],
-            },
-          });
-        },
-      },
+          }
+        ),
       data.fileType.endsWith('.sql') && { text: 'Open SQL', onClick: handleOpenSqlFile },
       data.fileType.endsWith('.yaml') && { text: 'Open YAML', onClick: handleOpenYamlFile },
+      data.fileType == 'jsonl' && {
+        text: 'Open in profiler',
+        submenu: getExtensions()
+          .drivers.filter(eng => eng.profilerFormatterFunction)
+          .map(eng => ({
+            text: eng.title,
+            onClick: () => {
+              openNewTab({
+                title: 'Profiler',
+                icon: 'img profiler',
+                tabComponent: 'ProfilerTab',
+                props: {
+                  jslidLoad: `archive://${data.folderName}/${data.fileName}`,
+                  engine: eng.engine,
+                  // profilerFormatterFunction: eng.profilerFormatterFunction,
+                  // profilerTimestampFunction: eng.profilerTimestampFunction,
+                  // profilerChartAggregateFunction: eng.profilerChartAggregateFunction,
+                  // profilerChartMeasures: eng.profilerChartMeasures,
+                },
+              });
+            },
+          })),
+      },
     ];
   }
 </script>
@@ -200,7 +205,7 @@
   {...$$restProps}
   {data}
   title={data.fileLabel}
-  icon={getArchiveIcon($archiveFilesAsDataSheets, data)}
+  icon={getArchiveIcon(data)}
   menu={createMenu}
   on:click={handleClick}
 />

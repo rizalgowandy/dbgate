@@ -1,12 +1,13 @@
 import _ from 'lodash';
 import uuidv1 from 'uuid/v1';
-import { get } from 'svelte/store';
-import { openedTabs } from '../stores';
+import { getActiveTab, getOpenedTabs, openedTabs } from '../stores';
 import tabs from '../tabs';
-import { setSelectedTabFunc } from './common';
+import { setSelectedTabFunc, switchCurrentDatabase } from './common';
 import localforage from 'localforage';
 import stableStringify from 'json-stable-stringify';
 import { saveAllPendingEditorData } from '../query/useEditorData';
+import { getConnectionInfo } from './metadataLoaders';
+import { getBoolSettingsValue } from '../settings/settingsTools';
 
 function findFreeNumber(numbers: number[]) {
   if (numbers.length == 0) return 1;
@@ -16,12 +17,30 @@ function findFreeNumber(numbers: number[]) {
   // return res;
 }
 
-export default async function openNewTab(newTab, initialData = undefined, options = undefined) {
-  const oldTabs = get(openedTabs);
+export default async function openNewTab(newTab, initialData: any = undefined, options: any = undefined) {
+  const oldTabs = getOpenedTabs();
+  const activeTab = getActiveTab();
 
   let existing = null;
 
-  const { savedFile, savedFolder, savedFilePath } = newTab.props || {};
+  if (!getBoolSettingsValue('behaviour.useTabPreviewMode', true) && newTab.tabPreviewMode) {
+    newTab = {
+      ...newTab,
+      tabPreviewMode: false,
+    };
+  }
+
+  const { savedFile, savedFolder, savedFilePath, conid, database } = newTab.props || {};
+
+  if (conid && database) {
+    const connection = await getConnectionInfo({ conid });
+    await switchCurrentDatabase({
+      connection,
+      name: database,
+    });
+  }
+
+  const { tabPreviewMode } = newTab;
   if (savedFile || savedFilePath) {
     existing = oldTabs.find(
       x =>
@@ -49,7 +68,9 @@ export default async function openNewTab(newTab, initialData = undefined, option
   }
 
   if (existing) {
-    openedTabs.update(tabs => setSelectedTabFunc(tabs, existing.tabid));
+    openedTabs.update(tabs =>
+      setSelectedTabFunc(tabs, existing.tabid, !tabPreviewMode ? { tabPreviewMode: false } : {})
+    );
     return;
   }
 
@@ -65,21 +86,50 @@ export default async function openNewTab(newTab, initialData = undefined, option
   const tabid = uuidv1();
   if (initialData) {
     for (const key of _.keys(initialData)) {
-      if (key == 'editor') {
+      if (key == 'editor' || key == 'rows') {
         await localforage.setItem(`tabdata_${key}_${tabid}`, initialData[key]);
       } else {
         localStorage.setItem(`tabdata_${key}_${tabid}`, JSON.stringify(initialData[key]));
       }
     }
   }
-  openedTabs.update(files => [
-    ...(files || []).map(x => ({ ...x, selected: false })),
-    {
+
+  openedTabs.update(files => {
+    const dbKey = getTabDbKey(newTab);
+    const items = sortTabs(files.filter(x => x.closedTime == null));
+
+    const newItem = {
       ...newTab,
       tabid,
-      selected: true,
-    },
-  ]);
+    };
+    if (dbKey != null) {
+      const lastIndex = _.findLastIndex(items, x => getTabDbKey(x) == dbKey);
+      if (lastIndex >= 0) {
+        items.splice(lastIndex + 1, 0, newItem);
+      } else {
+        items.push(newItem);
+      }
+    } else {
+      items.push(newItem);
+    }
+
+    const filesFiltered = tabPreviewMode ? (files || []).filter(x => !x.tabPreviewMode) : files;
+
+    return [
+      ...(filesFiltered || []).map(x => ({
+        ...x,
+        selected: false,
+        tabOrder: _.findIndex(items, y => y.tabid == x.tabid),
+      })),
+      {
+        ...newTab,
+        tabid,
+        selected: true,
+        multiTabIndex: newTab?.multiTabIndex ?? activeTab?.multiTabIndex ?? 0,
+        tabOrder: _.findIndex(items, y => y.tabid == tabid),
+      },
+    ];
+  });
 
   // console.log('OPENING NEW TAB', newTab);
   // const tabid = uuidv1();
@@ -123,4 +173,47 @@ export async function duplicateTab(tab) {
     initialData,
     { forceNewTab: true }
   );
+}
+
+export function getTabDbKey(tab) {
+  if (tab.tabComponent == 'ConnectionTab') {
+    return 'connections.';
+  }
+  if (tab.tabComponent?.startsWith('Admin')) {
+    return 'admin.';
+  }
+  if (tab.props && tab.props.conid && tab.props.database) {
+    return `database://${tab.props.database}-${tab.props.conid}`;
+  }
+  if (tab.props && tab.props.conid) {
+    return `server://${tab.props.conid}`;
+  }
+  if (tab.props && tab.props.archiveFolder) {
+    return `archive://${tab.props.archiveFolder}`;
+  }
+  return null;
+}
+
+export function sortTabs(tabs: any[]): any[] {
+  return _.sortBy(tabs, [x => x.tabOrder || 0, x => getTabDbKey(x), 'title', 'tabid']);
+}
+
+export function groupTabs(tabs: any[]) {
+  const res = [];
+
+  for (const tab of sortTabs(tabs)) {
+    const lastGroup = res[res.length - 1];
+    if (lastGroup && tab.tabDbKey && lastGroup.tabDbKey == tab.tabDbKey) {
+      lastGroup.tabs.push(tab);
+    } else {
+      res.push({
+        tabDbKey: tab.tabDbKey,
+        tabDbName: tab.tabDbName,
+        tabs: [tab],
+        grpid: tab.tabid,
+      });
+    }
+  }
+
+  return res;
 }

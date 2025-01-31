@@ -1,13 +1,23 @@
+const crypto = require('crypto');
 const _ = require('lodash');
 const path = require('path');
 const fs = require('fs-extra');
-const uuidv1 = require('uuid/v1');
 const byline = require('byline');
 const socket = require('../utility/socket');
 const { fork } = require('child_process');
 const { rundir, uploadsdir, pluginsdir, getPluginBackendPath, packagedPluginList } = require('../utility/directories');
-const { extractShellApiPlugins, extractShellApiFunctionName } = require('dbgate-tools');
+const {
+  extractShellApiPlugins,
+  extractShellApiFunctionName,
+  jsonScriptToJavascript,
+  getLogger,
+  safeJsonParse,
+  pinoLogRecordToMessageRecord,
+} = require('dbgate-tools');
 const { handleProcessCommunication } = require('../utility/processComm');
+const processArgs = require('../utility/processArgs');
+const platformInfo = require('../utility/platformInfo');
+const logger = getLogger('runners');
 
 function extractPlugins(script) {
   const requireRegex = /\s*\/\/\s*@require\s+([^\s]+)\s*\n/g;
@@ -27,18 +37,20 @@ const requirePluginsTemplate = (plugins, isExport) =>
 
 const scriptTemplate = (script, isExport) => `
 const dbgateApi = require(${isExport ? `'dbgate-api'` : 'process.env.DBGATE_API'});
+const logger = dbgateApi.getLogger('script');
 dbgateApi.initializeApiEnvironment();
 ${requirePluginsTemplate(extractPlugins(script), isExport)}
 require=null;
 async function run() {
 ${script}
 await dbgateApi.finalizer.run();
-console.log('Finished job script');
+logger.info('Finished job script');
 }
 dbgateApi.runScript(run);
 `;
 
-const loaderScriptTemplate = (functionName, props, runid) => `
+const loaderScriptTemplate = (prefix, functionName, props, runid) => `
+${prefix}
 const dbgateApi = require(process.env.DBGATE_API);
 dbgateApi.initializeApiEnvironment();
 ${requirePluginsTemplate(extractShellApiPlugins(functionName, props))}
@@ -57,20 +69,25 @@ module.exports = {
   requests: {},
 
   dispatchMessage(runid, message) {
-    if (message) console.log('...', message.message);
-    if (_.isString(message)) {
-      socket.emit(`runner-info-${runid}`, {
-        message,
-        time: new Date(),
-        severity: 'info',
-      });
-    }
-    if (_.isPlainObject(message)) {
-      socket.emit(`runner-info-${runid}`, {
-        time: new Date(),
-        severity: 'info',
-        ...message,
-      });
+    if (message) {
+      if (_.isPlainObject(message)) logger.log(message);
+      else logger.info(message);
+
+      const toEmit = _.isPlainObject(message)
+        ? {
+            time: new Date(),
+            ...message,
+          }
+        : {
+            message,
+            time: new Date(),
+          };
+
+      if (toEmit.level >= 50) {
+        toEmit.severity = 'error';
+      }
+
+      socket.emit(`runner-info-${runid}`, toEmit);
     }
   },
 
@@ -95,26 +112,46 @@ module.exports = {
     const scriptFile = path.join(uploadsdir(), runid + '.js');
     fs.writeFileSync(`${scriptFile}`, scriptText);
     fs.mkdirSync(directory);
-    const pluginNames = _.union(fs.readdirSync(pluginsdir()), packagedPluginList);
-    console.log(`RUNNING SCRIPT ${scriptFile}`);
+    const pluginNames = extractPlugins(scriptText);
+    logger.info({ scriptFile }, 'Running script');
     // const subprocess = fork(scriptFile, ['--checkParent', '--max-old-space-size=8192'], {
-    const subprocess = fork(scriptFile, ['--checkParent', ...process.argv.slice(3)], {
-      cwd: directory,
-      stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
-      env: {
-        ...process.env,
-        DBGATE_API: global['dbgateApiModulePath'] || process.argv[1],
-        ..._.fromPairs(pluginNames.map(name => [`PLUGIN_${_.camelCase(name)}`, getPluginBackendPath(name)])),
-      },
-    });
-    const pipeDispatcher = severity => data =>
-      this.dispatchMessage(runid, { severity, message: data.toString().trim() });
+    const subprocess = fork(
+      scriptFile,
+      [
+        '--checkParent', // ...process.argv.slice(3)
+        '--is-forked-api',
+        '--process-display-name',
+        'script',
+        ...processArgs.getPassArgs(),
+      ],
+      {
+        cwd: directory,
+        stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+        env: {
+          ...process.env,
+          DBGATE_API: global['API_PACKAGE'] || process.argv[1],
+          ..._.fromPairs(pluginNames.map(name => [`PLUGIN_${_.camelCase(name)}`, getPluginBackendPath(name)])),
+        },
+      }
+    );
+    const pipeDispatcher = severity => data => {
+      const json = safeJsonParse(data, null);
+
+      if (json) {
+        return this.dispatchMessage(runid, pinoLogRecordToMessageRecord(json));
+      } else {
+        return this.dispatchMessage(runid, {
+          message: json == null ? data.toString().trim() : null,
+          severity,
+        });
+      }
+    };
 
     byline(subprocess.stdout).on('data', pipeDispatcher('info'));
     byline(subprocess.stderr).on('data', pipeDispatcher('error'));
     subprocess.on('exit', code => {
-      this.rejectRequest(runid, { message: 'No data retured, maybe input data source is too big' });
-      console.log('... EXIT process', code);
+      this.rejectRequest(runid, { message: 'No data returned, maybe input data source is too big' });
+      logger.info({ code, pid: subprocess.pid }, 'Exited process');
       socket.emit(`runner-done-${runid}`, code);
     });
     subprocess.on('error', error => {
@@ -136,21 +173,31 @@ module.exports = {
       if (handleProcessCommunication(message, subprocess)) return;
       this[`handle_${msgtype}`](runid, message);
     });
-    return newOpened;
+    return _.pick(newOpened, ['runid']);
   },
 
-  start_meta: 'post',
+  start_meta: true,
   async start({ script }) {
-    const runid = uuidv1();
+    const runid = crypto.randomUUID();
+
+    if (script.type == 'json') {
+      const js = jsonScriptToJavascript(script);
+      return this.startCore(runid, scriptTemplate(js, false));
+    }
+
+    if (!platformInfo.allowShellScripting) {
+      return { errorMessage: 'Shell scripting is not allowed' };
+    }
+
     return this.startCore(runid, scriptTemplate(script, false));
   },
 
-  getNodeScript_meta: 'post',
+  getNodeScript_meta: true,
   async getNodeScript({ script }) {
     return scriptTemplate(script, true);
   },
 
-  cancel_meta: 'post',
+  cancel_meta: true,
   async cancel({ runid }) {
     const runner = this.opened.find(x => x.runid == runid);
     if (!runner) {
@@ -160,7 +207,7 @@ module.exports = {
     return { state: 'ok' };
   },
 
-  files_meta: 'get',
+  files_meta: true,
   async files({ runid }) {
     const directory = path.join(rundir(), runid);
     const files = await fs.readdir(directory);
@@ -176,12 +223,16 @@ module.exports = {
     return res;
   },
 
-  loadReader_meta: 'post',
+  loadReader_meta: true,
   async loadReader({ functionName, props }) {
+    const prefix = extractShellApiPlugins(functionName)
+      .map(packageName => `// @require ${packageName}\n`)
+      .join('');
+
     const promise = new Promise((resolve, reject) => {
-      const runid = uuidv1();
+      const runid = crypto.randomUUID();
       this.requests[runid] = [resolve, reject];
-      this.startCore(runid, loaderScriptTemplate(functionName, props, runid));
+      this.startCore(runid, loaderScriptTemplate(prefix, functionName, props, runid));
     });
     return promise;
   },

@@ -1,7 +1,7 @@
 import _ from 'lodash';
-import { filterName } from 'dbgate-tools';
+import { filterName, isTableColumnUnique } from 'dbgate-tools';
 import { GridDisplay, ChangeCacheFunc, DisplayColumn, DisplayedColumnInfo, ChangeConfigFunc } from './GridDisplay';
-import {
+import type {
   TableInfo,
   EngineDriver,
   ViewInfo,
@@ -36,7 +36,9 @@ export class TableGridDisplay extends GridDisplay {
     dbinfo: DatabaseInfo,
     public displayOptions: any,
     serverVersion,
-    public getDictionaryDescription: DictionaryDescriptionFunc = null
+    public getDictionaryDescription: DictionaryDescriptionFunc = null,
+    isReadOnly = false,
+    public isRawMode = false
   ) {
     super(config, setConfig, cache, setCache, driver, dbinfo, serverVersion);
 
@@ -50,16 +52,35 @@ export class TableGridDisplay extends GridDisplay {
     }
 
     this.columns = this.getDisplayColumns(this.table, []);
+    this.addFormDisplayColumns(this.getDisplayColumns(this.table, []));
     this.filterable = true;
     this.sortable = true;
     this.groupable = true;
-    this.editable = true;
+    this.editable = !isReadOnly;
     this.supportsReload = true;
     this.baseTable = this.table;
     if (this.table && this.table.columns) {
       this.changeSetKeyFields = this.table.primaryKey
         ? this.table.primaryKey.columns.map(x => x.columnName)
         : this.table.columns.map(x => x.columnName);
+    }
+
+    if (this.config.isFormView) {
+      this.addAllExpandedColumnsToSelected = true;
+      this.hintBaseColumns = this.formColumns;
+    }
+  }
+
+  addFormDisplayColumns(columns) {
+    for (const col of columns) {
+      this.formColumns.push(col);
+      if (this.isExpandedColumn(col.uniqueName)) {
+        const table = this.getFkTarget(col);
+        if (table) {
+          const subcolumns = this.getDisplayColumns(table, col.uniquePath);
+          this.addFormDisplayColumns(subcolumns);
+        }
+      }
     }
   }
 
@@ -79,10 +100,11 @@ export class TableGridDisplay extends GridDisplay {
           ...col,
           isChecked: this.isColumnChecked(col),
           hintColumnNames:
-            this.getFkDictionaryDescription(col.foreignKey)?.columns?.map(
+            this.getFkDictionaryDescription(col.isForeignKeyUnique ? col.foreignKey : null)?.columns?.map(
               columnName => `hint_${col.uniqueName}_${columnName}`
             ) || null,
-          hintColumnDelimiter: this.getFkDictionaryDescription(col.foreignKey)?.delimiter,
+          hintColumnDelimiter: this.getFkDictionaryDescription(col.isForeignKeyUnique ? col.foreignKey : null)
+            ?.delimiter,
           isExpandable: !!col.foreignKey,
         })) || []
     );
@@ -151,6 +173,9 @@ export class TableGridDisplay extends GridDisplay {
   }
 
   addHintsToSelect(select: Select): boolean {
+    if (this.isRawMode) {
+      return false;
+    }
     let res = false;
     const groupColumns = this.groupColumns;
     for (const column of this.hintBaseColumns || this.getGridColumns()) {
@@ -203,7 +228,8 @@ export class TableGridDisplay extends GridDisplay {
   }
 
   getFkTarget(column: DisplayColumn) {
-    const { uniqueName, foreignKey } = column;
+    const { uniqueName, foreignKey, isForeignKeyUnique } = column;
+    if (!isForeignKeyUnique) return null;
     const pureName = foreignKey.refTableName;
     const schemaName = foreignKey.refSchemaName;
     return this.findTable({ schemaName, pureName });
@@ -230,7 +256,7 @@ export class TableGridDisplay extends GridDisplay {
     const uniquePath = [...parentPath, col.columnName];
     const uniqueName = uniquePath.join('.');
     // console.log('this.config.addedColumns', this.config.addedColumns, uniquePath);
-    return {
+    const res = {
       ...col,
       pureName: table.pureName,
       schemaName: table.schemaName,
@@ -241,7 +267,19 @@ export class TableGridDisplay extends GridDisplay {
       foreignKey:
         table.foreignKeys &&
         table.foreignKeys.find(fk => fk.columns.length == 1 && fk.columns[0].columnName == col.columnName),
+      isForeignKeyUnique: false,
     };
+
+    if (res.foreignKey) {
+      const refTableInfo = this.dbinfo.tables.find(
+        x => x.schemaName == res.foreignKey.refSchemaName && x.pureName == res.foreignKey.refTableName
+      );
+      if (refTableInfo && isTableColumnUnique(refTableInfo, res.foreignKey.columns[0].refColumnName)) {
+        res.isForeignKeyUnique = true;
+      }
+    }
+
+    return res;
   }
 
   addAddedColumnsToSelect(
@@ -252,12 +290,9 @@ export class TableGridDisplay extends GridDisplay {
   ) {
     for (const column of columns) {
       if (this.addAllExpandedColumnsToSelected || this.config.addedColumns.includes(column.uniqueName)) {
-        select.columns.push({
-          exprType: 'column',
-          columnName: column.columnName,
-          alias: column.uniqueName,
-          source: { name: column, alias: parentAlias },
-        });
+        select.columns.push(
+          this.createColumnExpression(column, { name: column, alias: parentAlias }, column.uniqueName, 'view')
+        );
         displayedColumnInfo[column.uniqueName] = {
           ...column,
           sourceAlias: parentAlias,

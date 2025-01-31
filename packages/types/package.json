@@ -1,5 +1,5 @@
 {
-  "version": "4.1.1",
+  "version": "6.0.0-alpha.1",
   "name": "dbgate-types",
   "homepage": "https://dbgate.org/",
   "repository": {
@@ -7,7 +7,7 @@
     "url": "https://github.com/dbgate/dbgate.git"
   },
   "author": "Jan Prochazka",
-  "license": "MIT",
+  "license": "GPL-3.0",
   "keywords": [
     "dbgate"
   ],

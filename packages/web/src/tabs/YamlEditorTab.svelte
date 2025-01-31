@@ -29,13 +29,13 @@
 
   export let tabid;
 
-  const tabVisible: any = getContext('tabVisible');
+  const tabFocused: any = getContext('tabFocused');
 
-  export const activator = createActivator('MarkdownEditorTab', false);
+  export const activator = createActivator('YamlEditorTab', false);
 
   let domEditor;
 
-  $: if ($tabVisible && domEditor) {
+  $: if ($tabFocused && domEditor) {
     domEditor?.getEditor()?.focus();
   }
 
@@ -63,8 +63,6 @@
 
   function createMenu() {
     return [
-      { command: 'yaml.preview' },
-      { divider: true },
       { command: 'yaml.toggleComment' },
       { divider: true },
       { command: 'yaml.save' },

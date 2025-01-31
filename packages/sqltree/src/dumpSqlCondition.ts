@@ -1,7 +1,6 @@
-import { SqlDumper } from 'dbgate-types';
+import type { SqlDumper } from 'dbgate-types';
 import { Condition, BinaryCondition } from './types';
 import { dumpSqlExpression } from './dumpSqlExpression';
-import { link } from 'fs';
 import { dumpSqlSelect } from './dumpSqlCommand';
 
 export function dumpSqlCondition(dmp: SqlDumper, condition: Condition) {
@@ -68,6 +67,27 @@ export function dumpSqlCondition(dmp: SqlDumper, condition: Condition) {
       dumpSqlExpression(dmp, condition.left);
       dmp.put(' ^and ');
       dumpSqlExpression(dmp, condition.right);
+      break;
+    case 'expression':
+      dumpSqlExpression(dmp, condition.expr);
+      break;
+    case 'in':
+      dumpSqlExpression(dmp, condition.expr);
+      dmp.put(' ^in (%,v)', condition.values);
+      break;
+    case 'notIn':
+      dumpSqlExpression(dmp, condition.expr);
+      dmp.put(' ^not ^in (%,v)', condition.values);
+      break;
+    case 'rawTemplate':
+      let was = false;
+      for (const item of condition.templateSql.split('$$')) {
+        if (was) {
+          dumpSqlExpression(dmp, condition.expr);
+        }
+        dmp.putRaw(item);
+        was = true;
+      }
       break;
   }
 }

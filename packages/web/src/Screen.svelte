@@ -8,11 +8,13 @@
     leftPanelWidth,
     openedSnackbars,
     selectedWidget,
+    visibleWidgetSideBar,
     visibleCommandPalette,
+    visibleTitleBar,
     visibleToolbar,
   } from './stores';
-  import TabsPanel from './widgets/TabsPanel.svelte';
-  import TabRegister from './TabRegister.svelte';
+  import TabsPanel from './tabpanel/TabsPanel.svelte';
+  import TabRegister from './tabpanel/TabRegister.svelte';
   import CommandPalette from './commands/CommandPalette.svelte';
   import Toolbar from './widgets/Toolbar.svelte';
   import splitterDrag from './utility/splitterDrag';
@@ -22,33 +24,57 @@
   import ModalLayer from './modals/ModalLayer.svelte';
   import DragAndDropFileTarget from './DragAndDropFileTarget.svelte';
   import dragDropFileTarget from './utility/dragDropFileTarget';
+  import TitleBar from './widgets/TitleBar.svelte';
+  import FontIcon from './icons/FontIcon.svelte';
+  import getElectron from './utility/getElectron';
+  import TabsContainer from './tabpanel/TabsContainer.svelte';
+  import MultiTabsContainer from './tabpanel/MultiTabsContainer.svelte';
 
   $: currentThemeType = $currentThemeDefinition?.themeType == 'dark' ? 'theme-type-dark' : 'theme-type-light';
+
+  $: themeStyle = `<st` + `yle id="themePlugin">${$currentThemeDefinition?.themeCss}</st` + `yle>`;
+
+  const isElectron = !!getElectron();
 </script>
 
+<svelte:head>
+  {#if $currentThemeDefinition?.themeCss}
+    {@html themeStyle}
+  {/if}
+</svelte:head>
+
+<div class="not-supported" class:isElectron>
+  <div class="m-5 big-icon"><FontIcon icon="img warn" /></div>
+  <div class="m-3">Sorry, DbGate is not supported on mobile devices.</div>
+  <div class="m-3">Please visit <a href="https://dbgate.org">DbGate web</a> for more info.</div>
+</div>
+
 <div
-  class={`${$currentTheme} ${currentThemeType} root`}
+  class={`${$currentTheme} ${currentThemeType} root dbgate-screen`}
+  class:isElectron
   use:dragDropFileTarget
   on:contextmenu={e => e.preventDefault()}
 >
+  {#if $visibleTitleBar}
+    <div class="titlebar">
+      <TitleBar />
+    </div>
+  {/if}
   <div class="iconbar">
     <WidgetIconPanel />
   </div>
   <div class="statusbar">
     <StatusBar />
   </div>
-  {#if $selectedWidget}
+  {#if $selectedWidget && $visibleWidgetSideBar}
     <div class="leftpanel">
       <WidgetContainer />
     </div>
   {/if}
-  <div class="tabs">
-    <TabsPanel />
+  <div class="tabs-container">
+    <MultiTabsContainer />
   </div>
-  <div class="content">
-    <TabRegister />
-  </div>
-  {#if $selectedWidget}
+  {#if $selectedWidget && $visibleWidgetSideBar}
     <div
       class="horizontal-split-handle splitter"
       use:splitterDrag={'clientX'}
@@ -108,29 +134,6 @@
     background-color: var(--theme-bg-1);
     display: flex;
   }
-  .tabs {
-    display: flex;
-    position: fixed;
-    top: var(--dim-header-top);
-    left: var(--dim-content-left);
-    height: var(--dim-tabs-panel-height);
-    right: 0;
-    background-color: var(--theme-bg-2);
-    border-top: 1px solid var(--theme-border);
-
-    overflow-x: auto;
-  }
-  .tabs::-webkit-scrollbar {
-    height: 7px;
-  }
-  .content {
-    position: fixed;
-    top: var(--dim-content-top);
-    left: var(--dim-content-left);
-    bottom: var(--dim-statusbar-height);
-    right: 0;
-    background-color: var(--theme-bg-1);
-  }
   .commads {
     position: fixed;
     top: var(--dim-header-top);
@@ -138,7 +141,7 @@
   }
   .toolbar {
     position: fixed;
-    top: 0;
+    top: var(--dim-toolbar-top);
     height: var(--dim-toolbar-height);
     left: 0;
     right: 0;
@@ -156,5 +159,43 @@
     position: fixed;
     right: 0;
     bottom: var(--dim-statusbar-height);
+  }
+
+  .titlebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: var(--dim-titlebar-height);
+  }
+
+  .not-supported {
+    display: none;
+  }
+
+  @media only screen and (max-width: 600px) {
+    .dbgate-screen:not(.isElectron) {
+      display: none;
+    }
+
+    .not-supported:not(.isElectron) {
+      display: block;
+    }
+  }
+
+  .not-supported {
+    text-align: center;
+  }
+  .big-icon {
+    font-size: 20pt;
+  }
+
+  .tabs-container {
+    position: fixed;
+    top: var(--dim-header-top);
+    left: var(--dim-content-left);
+    bottom: var(--dim-statusbar-height);
+    right: 0;
+    background-color: var(--theme-bg-1);
   }
 </style>

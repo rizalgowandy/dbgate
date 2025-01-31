@@ -1,5 +1,5 @@
 <script lang="ts">
-  import FormStyledButton from '../elements/FormStyledButton.svelte';
+  import FormStyledButton from '../buttons/FormStyledButton.svelte';
 
   import FormProvider from '../forms/FormProvider.svelte';
   import FormSubmit from '../forms/FormSubmit.svelte';
@@ -8,14 +8,15 @@
   import { closeCurrentModal } from './modalTools';
 
   export let onConfirm;
+  export let url;
 
-  const handleSubmit = async e => {
+  const handleSubmit = e => {
     onConfirm(e.detail.url);
     closeCurrentModal();
   };
 </script>
 
-<FormProvider>
+<FormProvider initialValues={{ url }}>
   <ModalBase {...$$restProps}>
     <svelte:fragment slot="header">Download imported file from web</svelte:fragment>
 

@@ -1,12 +1,47 @@
-import { DatabaseInfo, DatabaseModification, EngineDriver, SqlDialect } from 'dbgate-types';
+import { DatabaseHandle, DatabaseInfo, DatabaseModification, EngineDriver, SqlDialect } from 'dbgate-types';
 import _sortBy from 'lodash/sortBy';
 import _groupBy from 'lodash/groupBy';
 import _pick from 'lodash/pick';
 import _compact from 'lodash/compact';
+import { getLogger } from './getLogger';
+import { type Logger } from 'pinomin';
+import { dbNameLogCategory, isCompositeDbName, splitCompositeDbName } from './schemaInfoTools';
+import { extractErrorLogData } from './stringTools';
 
-const STRUCTURE_FIELDS = ['tables', 'collections', 'views', 'matviews', 'functions', 'procedures', 'triggers'];
+const logger = getLogger('dbAnalyser');
+
+const STRUCTURE_FIELDS = [
+  'tables',
+  'collections',
+  'views',
+  'matviews',
+  'functions',
+  'procedures',
+  'triggers',
+  'schedulerEvents',
+];
 
 const fp_pick = arg => array => _pick(array, arg);
+
+function mergeTableRowCounts(info: DatabaseInfo, rowCounts): DatabaseInfo {
+  return {
+    ...info,
+    tables: (info.tables || []).map(table => ({
+      ...table,
+      tableRowCount: rowCounts.find(x => x.objectId == table.objectId)?.tableRowCount ?? table.tableRowCount,
+    })),
+  };
+}
+
+function areDifferentRowCounts(db1: DatabaseInfo, db2: DatabaseInfo) {
+  for (const t1 of db1.tables || []) {
+    const t2 = (db2.tables || []).find(x => x.objectId == t1.objectId);
+    if (t1?.tableRowCount !== t2?.tableRowCount) {
+      return true;
+    }
+  }
+  return false;
+}
 
 export class DatabaseAnalyser {
   structure: DatabaseInfo;
@@ -14,9 +49,11 @@ export class DatabaseAnalyser {
   singleObjectFilter: any;
   singleObjectId: string = null;
   dialect: SqlDialect;
+  logger: Logger;
 
-  constructor(public pool, public driver: EngineDriver, version) {
+  constructor(public dbhan: DatabaseHandle, public driver: EngineDriver, version) {
     this.dialect = (driver?.dialectByVersion && driver?.dialectByVersion(version)) || driver?.dialect;
+    this.logger = logger;
   }
 
   async _runAnalysis() {
@@ -42,6 +79,9 @@ export class DatabaseAnalyser {
   }
 
   async fullAnalysis() {
+    logger.debug(
+      `Performing full analysis, DB=${dbNameLogCategory(this.dbhan.database)}, engine=${this.driver.engine}`
+    );
     const res = this.addEngineField(await this._runAnalysis());
     // console.log('FULL ANALYSIS', res);
     return res;
@@ -62,16 +102,35 @@ export class DatabaseAnalyser {
   }
 
   async incrementalAnalysis(structure) {
+    logger.info(
+      `Performing incremental analysis, DB=${dbNameLogCategory(this.dbhan.database)}, engine=${this.driver.engine}`
+    );
     this.structure = structure;
 
-    this.modifications = await this.getModifications();
-    if (this.modifications == null) {
+    const modifications = await this.getModifications();
+    if (modifications == null) {
       // modifications not implemented, perform full analysis
       this.structure = null;
       return this.addEngineField(await this._runAnalysis());
     }
-    if (this.modifications.length == 0) return null;
-    console.log('DB modifications detected:', this.modifications);
+    const structureModifications = modifications.filter(x => x.action != 'setTableRowCounts');
+    const setTableRowCounts = modifications.find(x => x.action == 'setTableRowCounts');
+
+    let structureWithRowCounts = null;
+    if (setTableRowCounts) {
+      const newStructure = mergeTableRowCounts(structure, setTableRowCounts.rowCounts);
+      if (areDifferentRowCounts(structure, newStructure)) {
+        structureWithRowCounts = newStructure;
+      }
+    }
+
+    if (structureModifications.length == 0) {
+      return structureWithRowCounts ? this.addEngineField(structureWithRowCounts) : null;
+    }
+
+    this.modifications = structureModifications;
+    if (structureWithRowCounts) this.structure = structureWithRowCounts;
+    logger.info({ modifications: this.modifications }, 'DB modifications detected:');
     return this.addEngineField(this.mergeAnalyseResult(await this._runAnalysis()));
   }
 
@@ -134,7 +193,33 @@ export class DatabaseAnalyser {
   //   return this.structure.tables.find((x) => x.objectId == id);
   // }
 
-  createQuery(template, typeFields) {
+  // containsObjectIdCondition(typeFields) {
+  //   return this.createQueryCore('=OBJECT_ID_CONDITION', typeFields) != ' is not null';
+  // }
+
+  getDefaultSchemaNameCondition() {
+    return 'is not null';
+  }
+
+  createQuery(template, typeFields, replacements = {}) {
+    let query = this.createQueryCore(this.processQueryReplacements(template, replacements), typeFields);
+
+    const dbname = this.dbhan.database;
+    const schemaCondition = isCompositeDbName(dbname)
+      ? `= '${splitCompositeDbName(dbname).schema}' `
+      : ` ${this.getDefaultSchemaNameCondition()} `;
+
+    return query?.replace(/=SCHEMA_NAME_CONDITION/g, schemaCondition);
+  }
+
+  processQueryReplacements(query, replacements) {
+    for (const repl in replacements) {
+      query = query.replaceAll(repl, replacements[repl]);
+    }
+    return query;
+  }
+
+  createQueryCore(template, typeFields) {
     // let res = template;
     if (this.singleObjectFilter) {
       const { typeField } = this.singleObjectFilter;
@@ -153,7 +238,7 @@ export class DatabaseAnalyser {
       .filter(x => typeFields.includes(x.objectTypeField) && (x.action == 'add' || x.action == 'change'))
       .map(x => x.objectId);
     if (filterIds.length == 0) {
-      return template.replace(/=OBJECT_ID_CONDITION/g, " = '0'");
+      return null;
     }
     return template.replace(/=OBJECT_ID_CONDITION/g, ` in (${filterIds.map(x => `'${x}'`).join(',')})`);
   }
@@ -181,7 +266,17 @@ export class DatabaseAnalyser {
       ...this.getDeletedObjectsForField(snapshot, 'procedures'),
       ...this.getDeletedObjectsForField(snapshot, 'functions'),
       ...this.getDeletedObjectsForField(snapshot, 'triggers'),
+      ...this.getDeletedObjectsForField(snapshot, 'schedulerEvents'),
     ];
+  }
+
+  feedback(obj) {
+    if (this.dbhan.feedback) {
+      this.dbhan.feedback(obj);
+    }
+    if (obj && obj.analysingMessage) {
+      logger.debug(obj.analysingMessage);
+    }
   }
 
   async getModifications() {
@@ -226,7 +321,41 @@ export class DatabaseAnalyser {
       }
     }
 
+    const rowCounts = (snapshot.tables || [])
+      .filter(x => x.tableRowCount != null)
+      .map(x => ({
+        objectId: x.objectId,
+        tableRowCount: x.tableRowCount,
+      }));
+
+    if (rowCounts.length > 0) {
+      res.push({
+        action: 'setTableRowCounts',
+        rowCounts,
+      });
+    }
+
     return [..._compact(res), ...this.getDeletedObjects(snapshot)];
+  }
+
+  async analyserQuery(template, typeFields, replacements = {}) {
+    const sql = this.createQuery(template, typeFields, replacements);
+
+    if (!sql) {
+      return {
+        rows: [],
+      };
+    }
+    try {
+      const res = await this.driver.query(this.dbhan, sql);
+      this.logger.debug({ rows: res.rows.length, template }, `Loaded analyser query`);
+      return res;
+    } catch (err) {
+      logger.error(extractErrorLogData(err, { template }), 'Error running analyser query');
+      return {
+        rows: [],
+      };
+    }
   }
 
   static createEmptyStructure(): DatabaseInfo {
@@ -238,12 +367,12 @@ export class DatabaseAnalyser {
       functions: [],
       procedures: [],
       triggers: [],
-      schemas: [],
+      schedulerEvents: [],
     };
   }
 
   static byTableFilter(table) {
-    return x => x.pureName == table.pureName && x.schemaName == x.schemaName;
+    return x => x.pureName == table.pureName && x.schemaName == table.schemaName;
   }
 
   static extractPrimaryKeys(table, pkColumns) {

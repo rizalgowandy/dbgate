@@ -1,16 +1,21 @@
-import {
+import type {
   DatabaseInfo,
   EngineDriver,
   FunctionInfo,
   ProcedureInfo,
+  SchedulerEventInfo,
   TableInfo,
   TriggerInfo,
   ViewInfo,
 } from 'dbgate-types';
 import _flatten from 'lodash/flatten';
-import _uniqBy from 'lodash/uniqBy'
+import _uniqBy from 'lodash/uniqBy';
+import { getLogger } from './getLogger';
 import { SqlDumper } from './SqlDumper';
 import { extendDatabaseInfo } from './structureTools';
+import { extractErrorLogData } from './stringTools';
+
+const logger = getLogger('sqlGenerator');
 
 interface SqlGeneratorOptions {
   dropTables: boolean;
@@ -45,12 +50,16 @@ interface SqlGeneratorOptions {
   dropTriggers: boolean;
   checkIfTriggerExists: boolean;
   createTriggers: boolean;
+
+  dropSchedulerEvents: boolean;
+  checkIfSchedulerEventExists: boolean;
+  createSchedulerEvents: boolean;
 }
 
 interface SqlGeneratorObject {
   schemaName: string;
   pureName: string;
-  objectTypeField: 'tables' | 'views' | 'procedures' | 'functions';
+  objectTypeField: 'tables' | 'views' | 'procedures' | 'functions' | 'triggers' | 'schedulerEvents';
 }
 
 export class SqlGenerator {
@@ -60,6 +69,7 @@ export class SqlGenerator {
   private procedures: ProcedureInfo[];
   private functions: FunctionInfo[];
   private triggers: TriggerInfo[];
+  private schedulerEvents: SchedulerEventInfo[];
   public dbinfo: DatabaseInfo;
   public isTruncated = false;
   public isUnhandledException = false;
@@ -79,10 +89,11 @@ export class SqlGenerator {
     this.procedures = this.extract('procedures');
     this.functions = this.extract('functions');
     this.triggers = this.extract('triggers');
+    this.schedulerEvents = this.extract('schedulerEvents');
   }
 
   private handleException = error => {
-    console.log('Unhandled error', error);
+    logger.error(extractErrorLogData(error), 'Unhandled error');
     this.isUnhandledException = true;
   };
 
@@ -99,6 +110,8 @@ export class SqlGenerator {
       this.dropObjects(this.matviews, 'Matview');
       if (this.checkDumper()) return;
       this.dropObjects(this.triggers, 'Trigger');
+      if (this.checkDumper()) return;
+      this.dropObjects(this.schedulerEvents, 'SchedulerEvent');
       if (this.checkDumper()) return;
 
       this.dropTables();
@@ -125,6 +138,8 @@ export class SqlGenerator {
       this.createObjects(this.matviews, 'Matview');
       if (this.checkDumper()) return;
       this.createObjects(this.triggers, 'Trigger');
+      if (this.checkDumper()) return;
+      this.createObjects(this.schedulerEvents, 'SchedulerEvent');
       if (this.checkDumper()) return;
     } finally {
       process.off('uncaughtException', this.handleException);
@@ -282,10 +297,12 @@ export class SqlGenerator {
   }
 
   extract(objectTypeField) {
-    return this.dbinfo[objectTypeField].filter(x =>
-      this.objects.find(
-        y => x.pureName == y.pureName && x.schemaName == y.schemaName && y.objectTypeField == objectTypeField
-      )
+    return (
+      this.dbinfo[objectTypeField]?.filter(x =>
+        this.objects.find(
+          y => x.pureName == y.pureName && x.schemaName == y.schemaName && y.objectTypeField == objectTypeField
+        )
+      ) ?? []
     );
   }
 

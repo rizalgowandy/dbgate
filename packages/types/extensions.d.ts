@@ -3,6 +3,7 @@ import { EngineDriver } from './engines';
 export interface FileFormatDefinition {
   storageType: string;
   extension: string;
+  extensions?: string[];
   name: string;
   readerFunc?: string;
   writerFunc?: string;
@@ -22,9 +23,10 @@ export interface FileFormatDefinition {
 }
 
 export interface ThemeDefinition {
-  className: string;
+  themeClassName: string;
   themeName: string;
   themeType: 'light' | 'dark';
+  themeCss?: string;
 }
 
 export interface PluginDefinition {
@@ -35,8 +37,9 @@ export interface PluginDefinition {
 
 export interface QuickExportDefinition {
   label: string;
-  createWriter: (fileName: string) => { functionName: string; props: any };
+  createWriter: (fileName: string, dataName?: string) => { functionName: string; props: any };
   extension: string;
+  noFilenameDependency?: boolean;
 }
 
 export interface ExtensionsDirectory {

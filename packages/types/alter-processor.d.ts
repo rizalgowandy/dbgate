@@ -10,10 +10,19 @@ export interface AlterProcessor {
   changeConstraint(oldConstraint: ConstraintInfo, newConstraint: ConstraintInfo);
   dropConstraint(constraint: ConstraintInfo);
   renameTable(table: TableInfo, newName: string);
+  renameSqlObject(obj: SqlObjectInfo, newName: string);
   renameColumn(column: ColumnInfo, newName: string);
   renameConstraint(constraint: ConstraintInfo, newName: string);
   recreateTable(oldTable: TableInfo, newTable: TableInfo);
   createSqlObject(obj: SqlObjectInfo);
   dropSqlObject(obj: SqlObjectInfo);
-  fillPreloadedRows(table: NamedObjectInfo, oldRows: any[], newRows: any[], key: string[], insertOnly: string[]);
+  setTableOption(table: TableInfo, optionName: string, optionValue: string);
+  fillPreloadedRows(
+    table: NamedObjectInfo,
+    oldRows: any[],
+    newRows: any[],
+    key: string[],
+    insertOnly: string[],
+    autoIncrementColumn: string
+  );
 }

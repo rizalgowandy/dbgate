@@ -2,7 +2,7 @@ const _ = require('lodash');
 const fp = require('lodash/fp');
 const engines = require('../engines');
 const { testWrapper } = require('../tools');
-const { extendDatabaseInfo } = require('dbgate-tools');
+const { extendDatabaseInfo, runCommandOnDriver } = require('dbgate-tools');
 
 function createExpector(value) {
   return _.cloneDeepWith(value, x => {
@@ -25,7 +25,7 @@ function checkTableStructure2(t1, t2) {
 }
 
 async function testTableCreate(conn, driver, table) {
-  await driver.query(conn, `create table t0 (id int not null primary key)`);
+  await runCommandOnDriver(conn, driver, dmp => dmp.put('create table ~t0 (~id int not null primary key)'));
 
   const dmp = driver.createDumper();
   const table1 = {
@@ -62,7 +62,7 @@ describe('Table create', () => {
     })
   );
 
-  test.each(engines.map(engine => [engine.label, engine]))(
+  test.each(engines.filter(x => !x.skipIndexes).map(engine => [engine.label, engine]))(
     'Table with index - %s',
     testWrapper(async (conn, driver, engine) => {
       await testTableCreate(conn, driver, {
@@ -92,7 +92,7 @@ describe('Table create', () => {
     })
   );
 
-  test.each(engines.map(engine => [engine.label, engine]))(
+  test.each(engines.filter(x => !x.skipReferences).map(engine => [engine.label, engine]))(
     'Table with foreign key - %s',
     testWrapper(async (conn, driver, engine) => {
       await testTableCreate(conn, driver, {
@@ -122,7 +122,7 @@ describe('Table create', () => {
     })
   );
 
-  test.each(engines.map(engine => [engine.label, engine]))(
+  test.each(engines.filter(x => !x.skipUnique).map(engine => [engine.label, engine]))(
     'Table with unique - %s',
     testWrapper(async (conn, driver, engine) => {
       await testTableCreate(conn, driver, {

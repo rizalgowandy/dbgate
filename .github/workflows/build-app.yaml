@@ -1,75 +1,85 @@
+# --------------------------------------------------------------------------------------------
+# This file is generated. Do not edit manually
+# --------------------------------------------------------------------------------------------
 name: Electron app
-
-on:
+'on':
   push:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
-      # - 'v*' # Push events to matching v*, i.e. v1.0, v20.15.10
-
-    # branches:
-    #   - production
-
 jobs:
   build:
-    runs-on: ${{ matrix.os }}
-
+    runs-on: '${{ matrix.os }}'
     strategy:
+      fail-fast: false
       matrix:
-        # os: [ubuntu-18.04, windows-2016]
-        os: [macOS-10.15, windows-2016, ubuntu-18.04]
-
+        os:
+          - macos-14
+          - windows-2022
+          - ubuntu-22.04
     steps:
+      - name: Install python 3.11 (MacOS)
+        if: matrix.os == 'macos-14'
+        run: |
+          brew install python@3.11
+          echo "PYTHON=/opt/homebrew/bin/python3.11" >> $GITHUB_ENV
       - name: Context
         env:
-          GITHUB_CONTEXT: ${{ toJson(github) }}
+          GITHUB_CONTEXT: '${{ toJson(github) }}'
         run: echo "$GITHUB_CONTEXT"
       - uses: actions/checkout@v2
         with:
           fetch-depth: 1
-      - name: Use Node.js 12.x
+      - name: Use Node.js 22.x
         uses: actions/setup-node@v1
         with:
-          node-version: 12.x
+          node-version: 22.x
+      - name: adjustPackageJson
+        run: |
+
+          node adjustPackageJson --community
+      - name: yarn set timeout
+        run: |
+
+          yarn config set network-timeout 100000
       - name: yarn install
         run: |
+
           yarn install
       - name: setCurrentVersion
         run: |
+
           yarn setCurrentVersion
-      - name: fillNativeModulesElectron
+      - name: printSecrets
         run: |
-          yarn fillNativeModulesElectron
+
+          yarn printSecrets
+        env:
+          GIST_UPLOAD_SECRET: '${{secrets.GIST_UPLOAD_SECRET}}'
       - name: fillPackagedPlugins
         run: |
+
           yarn fillPackagedPlugins
       - name: Install Snapcraft
-        if: matrix.os == 'ubuntu-18.04'
+        if: matrix.os == 'ubuntu-22.04'
         uses: samuelmeuli/action-snapcraft@v1
       - name: Publish
         run: |
+
           yarn run build:app
         env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }} # token for electron publish
-          WIN_CSC_LINK: ${{ secrets.WINCERT_CERTIFICATE }}
-          WIN_CSC_KEY_PASSWORD: ${{ secrets.WINCERT_PASSWORD }}
-
+          GH_TOKEN: '${{ secrets.GH_TOKEN }}'
+          WIN_CSC_LINK: '${{ secrets.WINCERT_2025 }}'
+          WIN_CSC_KEY_PASSWORD: '${{ secrets.WINCERT_2025_PASSWORD }}'
+          CSC_LINK: '${{ secrets.APPLECERT_CERTIFICATE }}'
+          CSC_KEY_PASSWORD: '${{ secrets.APPLECERT_PASSWORD }}'
+          APPLE_ID: '${{ secrets.APPLE_ID }}'
+          APPLE_TEAM_ID: '${{ secrets.APPLE_TEAM_ID }}'
+          APPLE_ID_PASSWORD: '${{ secrets.APPLE_ID_PASSWORD }}'
+          SNAPCRAFT_STORE_CREDENTIALS: '${{secrets.SNAPCRAFT_LOGIN}}'
+          APPLE_APP_SPECIFIC_PASSWORD: '${{secrets.APPLE_APP_SPECIFIC_PASSWORD}}'
       - name: generatePadFile
         run: |
           yarn generatePadFile
-
-      - name: Save snap login
-        if: matrix.os == 'ubuntu-18.04'
-        run: 'echo "$SNAPCRAFT_LOGIN" > snapcraft.login'
-        shell: bash
-        env:
-          SNAPCRAFT_LOGIN: ${{secrets.SNAPCRAFT_LOGIN}}
-
-      - name: publishSnap
-        if: matrix.os == 'ubuntu-18.04'
-        run: |
-          snapcraft login --with snapcraft.login
-          snapcraft upload --release=stable app/dist/*.snap
-
       - name: Copy artifacts
         run: |
           mkdir artifacts          
@@ -78,80 +88,44 @@ jobs:
           cp app/dist/*x86*.AppImage artifacts/dbgate-latest.AppImage || true
           cp app/dist/*arm64*.AppImage artifacts/dbgate-latest-arm64.AppImage || true
           cp app/dist/*armv7l*.AppImage artifacts/dbgate-latest-armv7l.AppImage || true
-          cp app/dist/*.exe artifacts/dbgate-latest.exe || true
+          cp app/dist/*win*.exe artifacts/dbgate-latest.exe || true
           cp app/dist/*win_x64.zip artifacts/dbgate-windows-latest.zip || true
           cp app/dist/*win_arm64.zip artifacts/dbgate-windows-latest-arm64.zip || true
-          cp app/dist/*-mac.dmg artifacts/dbgate-latest.dmg || true
+          cp app/dist/*-mac_universal.dmg artifacts/dbgate-latest.dmg || true
+          cp app/dist/*-mac_x64.dmg artifacts/dbgate-latest-x64.dmg || true
           cp app/dist/*-mac_arm64.dmg artifacts/dbgate-latest-arm64.dmg || true
+          mv app/dist/*.snap artifacts/dbgate-latest.snap || true
 
           mv app/dist/*.exe artifacts/ || true
           mv app/dist/*.zip artifacts/ || true
+          mv app/dist/*.tar.gz artifacts/ || true
           mv app/dist/*.AppImage artifacts/ || true
           mv app/dist/*.deb artifacts/ || true
+          mv app/dist/*.snap artifacts/ || true
           mv app/dist/*.dmg artifacts/ || true
-          mv app/dist/*.snap artifacts/dbgate-latest.snap || true
+          mv app/dist/*.blockmap artifacts/ || true
 
-      # - name: Copy artifacts Linux, MacOs
-      #   if: matrix.os != 'windows-2016'
-      #   run: |
-      #     mkdir artifacts
-
-      #     cp app/dist/*.AppImage artifacts/ || true
-      #     cp app/dist/*.dmg artifacts/ || true
-      #     cp app/dist/*.deb artifacts/ || true
-
-      #     mv app/dist/*.deb artifacts/dbgate-linux.deb || true
-      #     mv app/dist/*.AppImage artifacts/dbgate-linux.AppImage || true
-      #     mv app/dist/*.dmg artifacts/dbgate-mac.dmg || true
-
-      # - name: Copy artifacts Win
-      #   if: matrix.os == 'windows-2016'
-      #   run: |
-      #     mkdir artifacts
-
-      #     cp app/dist/*.exe artifacts/ || true
-
-      #     mv app/dist/*.exe artifacts/dbgate-windows.exe
-
-      #     mv app/dist/latest.yml artifacts/latest.yml || true
-
-      - name: Copy latest.yml (windows)
-        if: matrix.os == 'windows-2016'
+          mv app/dist/*.yml artifacts/ || true
+          rm artifacts/builder-debug.yml
+      - name: Copy PAD file
+        if: matrix.os == 'windows-2022'
         run: |
-          mv app/dist/latest.yml artifacts/latest.yml || true
           mv app/dist/dbgate-pad.xml artifacts/ || true
-
-      - name: Copy latest-linux.yml
-        if: matrix.os == 'ubuntu-18.04'
-        run: |
-          mv app/dist/latest-linux.yml artifacts/latest-linux.yml || true
-
-      - name: Copy latest-mac.yml
-        if: matrix.os == 'macOS-10.15'
-        run: |
-          mv app/dist/latest-mac.yml artifacts/latest-mac.yml || true
-
       - name: Upload artifacts
-        uses: actions/upload-artifact@v1
+        uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.os }}
+          name: '${{ matrix.os }}'
           path: artifacts
-
       - name: Release
         uses: softprops/action-gh-release@v1
-        if: startsWith(github.ref, 'refs/tags/')
+        if: 'startsWith(github.ref, ''refs/tags/'')'
         with:
-          files: 'artifacts/**'
+          files: artifacts/**
+          prerelease: false
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}'
+      - name: Print content of notarization-error.log
+        if: failure() && matrix.os == 'macos-14'
+        run: |
 
-      # - name: Create Release
-      #   id: create_release
-      #   uses: actions/create-release@v1
-      #   env:
-      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      #   with:
-      #     tag_name: ${{ github.ref }}
-      #     release_name: Release ${{ github.ref }}
-      #     draft: false
-      #     prerelease: false
+          find . -type f -name "notarization-error.log" -exec echo "=== Start of {} ===" \; -exec cat {} \; -exec echo "=== End of {} ===" \;

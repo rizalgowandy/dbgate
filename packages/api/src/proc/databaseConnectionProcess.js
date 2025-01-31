@@ -1,22 +1,40 @@
 const stableStringify = require('json-stable-stringify');
 const { splitQuery } = require('dbgate-query-splitter');
 const childProcessChecker = require('../utility/childProcessChecker');
-const { extractBoolSettingsValue, extractIntSettingsValue } = require('dbgate-tools');
+const {
+  extractBoolSettingsValue,
+  extractIntSettingsValue,
+  getLogger,
+  isCompositeDbName,
+  dbNameLogCategory,
+  extractErrorMessage,
+  extractErrorLogData,
+} = require('dbgate-tools');
 const requireEngineDriver = require('../utility/requireEngineDriver');
 const connectUtility = require('../utility/connectUtility');
 const { handleProcessCommunication } = require('../utility/processComm');
 const { SqlGenerator } = require('dbgate-tools');
 const generateDeploySql = require('../shell/generateDeploySql');
+const { dumpSqlSelect } = require('dbgate-sqltree');
 
-let systemConnection;
+const logger = getLogger('dbconnProcess');
+
+let dbhan;
 let storedConnection;
 let afterConnectCallbacks = [];
 let afterAnalyseCallbacks = [];
 let analysedStructure = null;
 let lastPing = null;
+let lastStatusString = null;
 let lastStatus = null;
 let analysedTime = 0;
 let serverVersion;
+
+let statusCounter = 0;
+function getStatusCounter() {
+  statusCounter += 1;
+  return statusCounter;
+}
 
 async function checkedAsyncCall(promise) {
   try {
@@ -25,7 +43,7 @@ async function checkedAsyncCall(promise) {
   } catch (err) {
     setStatus({
       name: 'error',
-      message: err.message,
+      message: extractErrorMessage(err, 'Checked call error'),
     });
     // console.error(err);
     setTimeout(() => process.exit(1), 1000);
@@ -36,10 +54,16 @@ async function checkedAsyncCall(promise) {
 let loadingModel = false;
 
 async function handleFullRefresh() {
+  if (storedConnection.useSeparateSchemas && !isCompositeDbName(dbhan?.database)) {
+    resolveAnalysedPromises();
+    // skip loading DB structure
+    return;
+  }
+
   loadingModel = true;
   const driver = requireEngineDriver(storedConnection);
   setStatusName('loadStructure');
-  analysedStructure = await checkedAsyncCall(driver.analyseFull(systemConnection, serverVersion));
+  analysedStructure = await checkedAsyncCall(driver.analyseFull(dbhan, serverVersion));
   analysedTime = new Date().getTime();
   process.send({ msgtype: 'structure', structure: analysedStructure });
   process.send({ msgtype: 'structureTime', analysedTime });
@@ -50,12 +74,15 @@ async function handleFullRefresh() {
 }
 
 async function handleIncrementalRefresh(forceSend) {
+  if (storedConnection.useSeparateSchemas && !isCompositeDbName(dbhan?.database)) {
+    resolveAnalysedPromises();
+    // skip loading DB structure
+    return;
+  }
   loadingModel = true;
   const driver = requireEngineDriver(storedConnection);
   setStatusName('checkStructure');
-  const newStructure = await checkedAsyncCall(
-    driver.analyseIncremental(systemConnection, analysedStructure, serverVersion)
-  );
+  const newStructure = await checkedAsyncCall(driver.analyseIncremental(dbhan, analysedStructure, serverVersion));
   analysedTime = new Date().getTime();
   if (newStructure != null) {
     analysedStructure = newStructure;
@@ -71,26 +98,30 @@ async function handleIncrementalRefresh(forceSend) {
   resolveAnalysedPromises();
 }
 
-function handleSyncModel() {
+function handleSyncModel({ isFullRefresh }) {
   if (loadingModel) return;
-  handleIncrementalRefresh();
+  if (isFullRefresh) handleFullRefresh();
+  else handleIncrementalRefresh();
 }
 
 function setStatus(status) {
-  const statusString = stableStringify(status);
-  if (lastStatus != statusString) {
-    process.send({ msgtype: 'status', status });
-    lastStatus = statusString;
+  const newStatus = { ...lastStatus, ...status };
+  const statusString = stableStringify(newStatus);
+  if (lastStatusString != statusString) {
+    process.send({ msgtype: 'status', status: { ...newStatus, counter: getStatusCounter() } });
+    lastStatusString = statusString;
+    lastStatus = newStatus;
   }
 }
 
 function setStatusName(name) {
-  setStatus({ name });
+  setStatus({ name, message: null });
 }
 
 async function readVersion() {
   const driver = requireEngineDriver(storedConnection);
-  const version = await driver.getVersion(systemConnection);
+  const version = await driver.getVersion(dbhan);
+  logger.debug(`Got server version: ${version.version}`);
   process.send({ msgtype: 'version', version });
   serverVersion = version;
 }
@@ -101,7 +132,13 @@ async function handleConnect({ connection, structure, globalSettings }) {
 
   if (!structure) setStatusName('pending');
   const driver = requireEngineDriver(storedConnection);
-  systemConnection = await checkedAsyncCall(connectUtility(driver, storedConnection));
+  dbhan = await checkedAsyncCall(connectUtility(driver, storedConnection, 'app'));
+  logger.debug(
+    `Connected to database, driver: ${storedConnection.engine}, separate schemas: ${
+      storedConnection.useSeparateSchemas ? 'YES' : 'NO'
+    }, 'DB: ${dbNameLogCategory(dbhan.database)} }`
+  );
+  dbhan.feedback = feedback => setStatus({ feedback });
   await checkedAsyncCall(readVersion());
   if (structure) {
     analysedStructure = structure;
@@ -124,7 +161,7 @@ async function handleConnect({ connection, structure, globalSettings }) {
 }
 
 function waitConnected() {
-  if (systemConnection) return Promise.resolve();
+  if (dbhan) return Promise.resolve();
   return new Promise((resolve, reject) => {
     afterConnectCallbacks.push([resolve, reject]);
   });
@@ -144,36 +181,132 @@ function resolveAnalysedPromises() {
   afterAnalyseCallbacks = [];
 }
 
-async function handleRunScript({ msgid, sql }) {
+async function handleRunScript({ msgid, sql, useTransaction }, skipReadonlyCheck = false) {
   await waitConnected();
   const driver = requireEngineDriver(storedConnection);
   try {
-    await driver.script(systemConnection, sql);
+    if (!skipReadonlyCheck) ensureExecuteCustomScript(driver);
+    await driver.script(dbhan, sql, { useTransaction });
     process.send({ msgtype: 'response', msgid });
   } catch (err) {
-    process.send({ msgtype: 'response', msgid, errorMessage: err.message });
+    process.send({
+      msgtype: 'response',
+      msgid,
+      errorMessage: extractErrorMessage(err, 'Error executing SQL script'),
+    });
   }
 }
 
-async function handleQueryData({ msgid, sql }) {
+async function handleRunOperation({ msgid, operation, useTransaction }, skipReadonlyCheck = false) {
   await waitConnected();
   const driver = requireEngineDriver(storedConnection);
   try {
-    const res = await driver.query(systemConnection, sql);
+    if (!skipReadonlyCheck) ensureExecuteCustomScript(driver);
+    await driver.operation(dbhan, operation, { useTransaction });
+    process.send({ msgtype: 'response', msgid });
+  } catch (err) {
+    process.send({
+      msgtype: 'response',
+      msgid,
+      errorMessage: extractErrorMessage(err, 'Error executing DB operation'),
+    });
+  }
+}
+
+async function handleQueryData({ msgid, sql }, skipReadonlyCheck = false) {
+  await waitConnected();
+  const driver = requireEngineDriver(storedConnection);
+  try {
+    if (!skipReadonlyCheck) ensureExecuteCustomScript(driver);
+    // console.log(sql);
+    const res = await driver.query(dbhan, sql);
     process.send({ msgtype: 'response', msgid, ...res });
   } catch (err) {
-    process.send({ msgtype: 'response', msgid, errorMessage: err.message });
+    process.send({
+      msgtype: 'response',
+      msgid,
+      errorMessage: extractErrorMessage(err, 'Error executing SQL script'),
+    });
   }
+}
+
+async function handleSqlSelect({ msgid, select }) {
+  const driver = requireEngineDriver(storedConnection);
+  const dmp = driver.createDumper();
+  dumpSqlSelect(dmp, select);
+  return handleQueryData({ msgid, sql: dmp.s }, true);
+}
+
+async function handleDriverDataCore(msgid, callMethod, { logName }) {
+  await waitConnected();
+  const driver = requireEngineDriver(storedConnection);
+  try {
+    const result = await callMethod(driver);
+    process.send({ msgtype: 'response', msgid, result });
+  } catch (err) {
+    logger.error(extractErrorLogData(err, { logName }), `Error when handling message ${logName}`);
+    process.send({ msgtype: 'response', msgid, errorMessage: extractErrorMessage(err, 'Error executing DB data') });
+  }
+}
+
+async function handleSchemaList({ msgid }) {
+  logger.debug('Loading schema list');
+  return handleDriverDataCore(msgid, driver => driver.listSchemas(dbhan), { logName: 'listSchemas' });
 }
 
 async function handleCollectionData({ msgid, options }) {
-  await waitConnected();
-  const driver = requireEngineDriver(storedConnection);
-  try {
-    const result = await driver.readCollection(systemConnection, options);
-    process.send({ msgtype: 'response', msgid, result });
-  } catch (err) {
-    process.send({ msgtype: 'response', msgid, errorMessage: err.message });
+  return handleDriverDataCore(msgid, driver => driver.readCollection(dbhan, options), { logName: 'readCollection' });
+}
+
+async function handleLoadKeys({ msgid, root, filter, limit }) {
+  return handleDriverDataCore(msgid, driver => driver.loadKeys(dbhan, root, filter, limit), { logName: 'loadKeys' });
+}
+
+async function handleExportKeys({ msgid, options }) {
+  return handleDriverDataCore(msgid, driver => driver.exportKeys(dbhan, options), { logName: 'exportKeys' });
+}
+
+async function handleLoadKeyInfo({ msgid, key }) {
+  return handleDriverDataCore(msgid, driver => driver.loadKeyInfo(dbhan, key), { logName: 'loadKeyInfo' });
+}
+
+async function handleCallMethod({ msgid, method, args }) {
+  return handleDriverDataCore(
+    msgid,
+    driver => {
+      if (storedConnection.isReadOnly) {
+        throw new Error('Connection is read only, cannot call custom methods');
+      }
+
+      ensureExecuteCustomScript(driver);
+      return driver.callMethod(dbhan, method, args);
+    },
+    { logName: `callMethod:${method}` }
+  );
+}
+
+async function handleLoadKeyTableRange({ msgid, key, cursor, count }) {
+  return handleDriverDataCore(msgid, driver => driver.loadKeyTableRange(dbhan, key, cursor, count), {
+    logName: 'loadKeyTableRange',
+  });
+}
+
+async function handleLoadFieldValues({ msgid, schemaName, pureName, field, search, dataType }) {
+  return handleDriverDataCore(
+    msgid,
+    driver => driver.loadFieldValues(dbhan, { schemaName, pureName }, field, search, dataType),
+    {
+      logName: 'loadFieldValues',
+    }
+  );
+}
+
+function ensureExecuteCustomScript(driver) {
+  if (driver.readOnlySessions) {
+    return;
+  }
+  if (storedConnection.isReadOnly) {
+    throw new Error('Connection is read only');
   }
 }
 
@@ -181,10 +314,11 @@ async function handleUpdateCollection({ msgid, changeSet }) {
   await waitConnected();
   const driver = requireEngineDriver(storedConnection);
   try {
-    const result = await driver.updateCollection(systemConnection, changeSet);
+    ensureExecuteCustomScript(driver);
+    const result = await driver.updateCollection(dbhan, changeSet);
     process.send({ msgtype: 'response', msgid, result });
   } catch (err) {
-    process.send({ msgtype: 'response', msgid, errorMessage: err.message });
+    process.send({ msgtype: 'response', msgid, errorMessage: extractErrorMessage(err, 'Error updating collection') });
   }
 }
 
@@ -194,18 +328,24 @@ async function handleSqlPreview({ msgid, objects, options }) {
 
   try {
     const dmp = driver.createDumper();
-    const generator = new SqlGenerator(analysedStructure, options, objects, dmp, driver, systemConnection);
+    const generator = new SqlGenerator(analysedStructure, options, objects, dmp, driver, dbhan);
 
     await generator.dump();
     process.send({ msgtype: 'response', msgid, sql: dmp.s, isTruncated: generator.isTruncated });
     if (generator.isUnhandledException) {
-      setTimeout(() => {
-        console.log('Exiting because of unhandled exception');
+      setTimeout(async () => {
+        logger.error('Exiting because of unhandled exception');
+        await driver.close(dbhan);
         process.exit(0);
       }, 500);
     }
   } catch (err) {
-    process.send({ msgtype: 'response', msgid, isError: true, errorMessage: err.message });
+    process.send({
+      msgtype: 'response',
+      msgid,
+      isError: true,
+      errorMessage: extractErrorMessage(err, 'Error generating SQL preview'),
+    });
   }
 }
 
@@ -214,14 +354,19 @@ async function handleGenerateDeploySql({ msgid, modelFolder }) {
 
   try {
     const res = await generateDeploySql({
-      systemConnection,
+      systemConnection: dbhan,
       connection: storedConnection,
       analysedStructure,
       modelFolder,
     });
     process.send({ ...res, msgtype: 'response', msgid });
   } catch (err) {
-    process.send({ msgtype: 'response', msgid, isError: true, errorMessage: err.message });
+    process.send({
+      msgtype: 'response',
+      msgid,
+      isError: true,
+      errorMessage: extractErrorMessage(err, 'Error generating deploy SQL'),
+    });
   }
 }
 
@@ -240,12 +385,21 @@ const messageHandlers = {
   connect: handleConnect,
   queryData: handleQueryData,
   runScript: handleRunScript,
+  runOperation: handleRunOperation,
   updateCollection: handleUpdateCollection,
   collectionData: handleCollectionData,
+  loadKeys: handleLoadKeys,
+  loadKeyInfo: handleLoadKeyInfo,
+  callMethod: handleCallMethod,
+  loadKeyTableRange: handleLoadKeyTableRange,
   sqlPreview: handleSqlPreview,
   ping: handlePing,
   syncModel: handleSyncModel,
   generateDeploySql: handleGenerateDeploySql,
+  loadFieldValues: handleLoadFieldValues,
+  sqlSelect: handleSqlSelect,
+  exportKeys: handleExportKeys,
+  schemaList: handleSchemaList,
   // runCommand: handleRunCommand,
 };
 
@@ -257,20 +411,23 @@ async function handleMessage({ msgtype, ...other }) {
 function start() {
   childProcessChecker();
 
-  setInterval(() => {
+  setInterval(async () => {
     const time = new Date().getTime();
-    if (time - lastPing > 120 * 1000) {
-      console.log('Database connection not alive, exiting');
+    if (time - lastPing > 40 * 1000) {
+      logger.info('Database connection not alive, exiting');
+      const driver = requireEngineDriver(storedConnection);
+      await driver.close(dbhan);
       process.exit(0);
     }
-  }, 60 * 1000);
+  }, 10 * 1000);
 
   process.on('message', async message => {
     if (handleProcessCommunication(message)) return;
     try {
       await handleMessage(message);
-    } catch (e) {
-      process.send({ msgtype: 'error', error: e.message });
+    } catch (err) {
+      logger.error(extractErrorLogData(err), 'Error in DB connection');
+      process.send({ msgtype: 'error', error: extractErrorMessage(err, 'Error processing message') });
     }
   });
 }

@@ -1,4 +1,4 @@
-import { EngineDriver, ExtensionsDirectory } from 'dbgate-types';
+import type { EngineDriver, ExtensionsDirectory } from 'dbgate-types';
 import _camelCase from 'lodash/camelCase';
 import _isString from 'lodash/isString';
 import _isPlainObject from 'lodash/isPlainObject';
@@ -36,6 +36,9 @@ export function extractShellApiFunctionName(functionName) {
 }
 
 export function findEngineDriver(connection, extensions: ExtensionsDirectory): EngineDriver {
+  if (!extensions) {
+    return null;
+  }
   if (_isString(connection)) {
     return extensions.drivers.find(x => x.engine == connection);
   }

@@ -25,44 +25,21 @@
       newTop = offset.top - height;
 
       if (newTop < 0) newTop = 0;
-      if (newTop + height > window.innerHeight) {
-        element.style.height = `${window.innerHeight - newTop}px`;
-      }
     }
 
     if (newLeft != null) element.style.left = `${newLeft}px`;
     if (newTop != null) element.style.top = `${newTop}px`;
   }
-
-  function mapItem(item, commands) {
-    if (item.command) {
-      const command = commands[item.command];
-      if (command) {
-        return {
-          text: command.menuName || command.toolbarName || command.name,
-          keyText: command.keyText || command.keyTextFromGroup,
-          onClick: () => {
-            if (command.getSubCommands) visibleCommandPalette.set(command);
-            else if (command.onClick) command.onClick();
-          },
-          disabled: !command.enabled,
-          hideDisabled: item.hideDisabled,
-        };
-      }
-      return null;
-    }
-    return item;
-  }
 </script>
 
 <script>
   import _ from 'lodash';
-  import clickOutside from '../utility/clickOutside';
   import { createEventDispatcher } from 'svelte';
   import { onMount } from 'svelte';
   import { commandsCustomized, visibleCommandPalette } from '../stores';
-  import { extractMenuItems } from '../utility/contextMenu';
+  import { prepareMenuItems } from '../utility/contextMenu';
   import FontIcon from '../icons/FontIcon.svelte';
+  import { formatKeyText } from '../utility/common';
 
   export let items;
   export let top;
@@ -78,7 +55,22 @@
   let submenuItem;
   let submenuOffset;
 
+  let switchIndex = 0;
+
   const dispatch = createEventDispatcher();
+  let closeHandlers = [];
+
+  function dispatchClose() {
+    dispatch('close');
+    for (const handler of closeHandlers) {
+      handler();
+    }
+    closeHandlers = [];
+  }
+
+  function registerCloseHandler(handler) {
+    closeHandlers.push(handler);
+  }
 
   function handleClick(e, item) {
     if (item.disabled) return;
@@ -90,9 +82,24 @@
       submenuOffset = hoverOffset;
       return;
     }
-    dispatch('close');
+    if (item.switchStore && item.switchValue) {
+      item.switchStore.update(x => ({
+        ...x,
+        [item.switchValue]: !x[item.switchValue],
+      }));
+      switchIndex++;
+      return;
+    }
+    dispatchClose();
     if (onCloseParent) onCloseParent();
     if (item.onClick) item.onClick();
+  }
+
+  function handleClickAlt(e, item) {
+    if (item.disabled) return;
+    dispatchClose();
+    if (onCloseParent) onCloseParent();
+    if (item.onClickAlt) item.onClickAlt();
   }
 
   onMount(() => {
@@ -104,15 +111,13 @@
     submenuOffset = hoverOffset;
   }, 500);
 
-  $: extracted = extractMenuItems(items, { targetElement });
-  $: compacted = _.compact(extracted.map(x => mapItem(x, $commandsCustomized)));
-  $: filtered = compacted.filter(x => !x.disabled || !x.hideDisabled);
+  $: preparedItems = prepareMenuItems(items, { targetElement, registerCloseHandler }, $commandsCustomized);
 
   const handleClickOutside = event => {
     // if (element && !element.contains(event.target) && !event.defaultPrevented) {
     if (event.target.closest('ul.dropDownMenuMarker')) return;
 
-    dispatch('close');
+    dispatchClose();
   };
 
   onMount(() => {
@@ -124,7 +129,7 @@
 </script>
 
 <ul class="dropDownMenuMarker" style={`left: ${left}px; top: ${top}px`} bind:this={element}>
-  {#each filtered as item}
+  {#each preparedItems as item}
     {#if item.divider}
       <li class="divider" />
     {:else}
@@ -135,10 +140,26 @@
           changeActiveSubmenu();
         }}
       >
-        <a on:click={e => handleClick(e, item)} class:disabled={item.disabled}>
-          {item.text}
+        <a on:click={e => handleClick(e, item)} class:disabled={item.disabled} class:bold={item.isBold}>
+          <span>
+            {#if item.switchValue && item.switchStoreGetter}
+              {#key switchIndex}
+                {#if item.switchStoreGetter()[item.switchValue]}
+                  <FontIcon icon="icon check" padRight />
+                {:else}
+                  <FontIcon icon="icon invisible-box" padRight />
+                {/if}
+              {/key}
+            {/if}
+            {item.text || item.label}
+          </span>
           {#if item.keyText}
-            <span class="keyText">{item.keyText}</span>
+            <span class="keyText">{formatKeyText(item.keyText)}</span>
+          {/if}
+          {#if item.iconAlt}
+            <span class="alt-icon" on:click={e => handleClickAlt(e, item)}>
+              <FontIcon icon={item.iconAlt} />
+            </span>
           {/if}
           {#if item.submenu}
             <div class="menu-right">
@@ -156,7 +177,7 @@
     {...submenuOffset}
     onCloseParent={() => {
       if (onCloseParent) onCloseParent();
-      dispatch('close');
+      dispatchClose();
     }}
   />
 {/if}
@@ -165,9 +186,9 @@
   ul {
     position: absolute;
     list-style: none;
-    background-color: #fff;
+    background-color: var(--theme-bg-0);
     border-radius: 4px;
-    border: 1px solid rgba(0, 0, 0, 0.15);
+    border: 1px solid var(--theme-border);
     box-shadow: 0 6px 12px rgba(0, 0, 0, 0.175);
     padding: 5px 0;
     margin: 2px 0 0;
@@ -178,6 +199,8 @@
     cursor: default;
     white-space: nowrap;
     overflow-y: auto;
+    max-height: calc(100% - 20px);
+    user-select: none;
   }
 
   .keyText {
@@ -191,29 +214,41 @@
     padding: 3px 20px;
     line-height: 1.42;
     white-space: nop-wrap;
-    color: #262626;
+    color: var(--theme-font-1);
     display: flex;
     justify-content: space-between;
   }
 
   a.disabled {
-    color: gray;
+    color: var(--theme-font-3);
+  }
+
+  a.bold {
+    font-weight: bold;
   }
 
   a:hover:not(.disabled) {
-    background-color: #f5f5f5;
+    background-color: var(--theme-bg-1);
     text-decoration: none;
-    color: #262626;
+    color: var(--theme-font-1);
   }
 
   .divider {
     margin: 9px 0px 9px 0px;
-    border-top: 1px solid #f2f2f2;
-    border-bottom: 1px solid #fff;
+    border-top: 1px solid var(--theme-border);
+    border-bottom: 1px solid var(--theme-bg-0);
   }
 
   .menu-right {
     position: relative;
     left: 15px;
+  }
+
+  .alt-icon:hover {
+    cursor: pointer;
+  }
+
+  .alt-icon:hover {
+    color: var(--theme-font-hover);
   }
 </style>

@@ -1,6 +1,7 @@
 import _ from 'lodash';
-import { arrayToHexString } from 'dbgate-tools';
+import { arrayToHexString, stringifyCellValue } from 'dbgate-tools';
 import yaml from 'js-yaml';
+import { DataEditorTypesBehaviour } from 'dbgate-types';
 
 export function copyTextToClipboard(text) {
   const oldFocus = document.activeElement;
@@ -66,16 +67,20 @@ export function copyTextToClipboard(text) {
   }
 }
 
-export function extractRowCopiedValue(row, col) {
+/* Currently this doesn't work in firefox stable, but works in nightly */
+export async function getClipboardText() {
+  return await navigator.clipboard.readText();
+}
+
+export function extractRowCopiedValue(row, col, editorTypes?: DataEditorTypesBehaviour) {
   let value = row[col];
   if (value === undefined) value = _.get(row, col);
-  if (value === null) return '(NULL)';
-  if (value === undefined) return '(NoField)';
-  if (value && value.$oid) return `ObjectId("${value.$oid}")`;
-  if (value && value.type == 'Buffer' && _.isArray(value.data)) return arrayToHexString(value.data);
-  if (_.isPlainObject(value) || _.isArray(value)) return JSON.stringify(value);
-  return value;
+  return stringifyCellValue(value, 'exportIntent', editorTypes).value;
 }
+
+const clipboardHeadersFormatter = delimiter => columns => {
+  return columns.join(delimiter);
+};
 
 const clipboardTextFormatter = (delimiter, headers) => (columns, rows) => {
   const lines = [];
@@ -161,6 +166,11 @@ export const copyRowsFormatDefs = {
     name: 'Without headers',
     formatter: clipboardTextFormatter('\t', false),
   },
+  headers: {
+    label: 'Copy only headers',
+    name: 'Only Headers',
+    formatter: clipboardHeadersFormatter('\t'),
+  },
   csv: {
     label: 'Copy as CSV',
     name: 'CSV',
@@ -172,8 +182,8 @@ export const copyRowsFormatDefs = {
     formatter: clipboardJsonFormatter(),
   },
   jsonLines: {
-    label: 'Copy as JSON lines',
-    name: 'JSON lines',
+    label: 'Copy as JSON lines/NDJSON',
+    name: 'JSON lines/NDJSON',
     formatter: clipboardJsonLinesFormatter(),
   },
   yaml: {

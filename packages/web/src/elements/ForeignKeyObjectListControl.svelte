@@ -8,7 +8,7 @@
 
   export let collection;
   export let title;
-  export let clickable;
+  export let clickable = false;
   export let onRemove = null;
   export let onAddNew = null;
   export let emptyMessage = null;
@@ -26,28 +26,32 @@
       fieldName: 'baseColumns',
       header: 'Base columns',
       slot: 0,
+      sortable: true,
     },
     {
       fieldName: 'refTableName',
       header: 'Referenced table',
+      sortable: true,
     },
     {
       fieldName: 'refColumns',
       header: 'Referenced columns',
       slot: 1,
+      sortable: true,
     },
     {
       fieldName: 'updateAction',
       header: 'ON UPDATE',
+      sortable: true,
     },
     {
       fieldName: 'deleteAction',
       header: 'ON DELETE',
+      sortable: true,
     },
     onRemove
       ? {
           fieldName: 'actions',
-          sortable: true,
           slot: 2,
         }
       : null,

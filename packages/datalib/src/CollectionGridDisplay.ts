@@ -1,7 +1,8 @@
 import _ from 'lodash';
 import { GridDisplay, ChangeCacheFunc, ChangeConfigFunc, DisplayColumn } from './GridDisplay';
-import { EngineDriver, ViewInfo, ColumnInfo, CollectionInfo } from 'dbgate-types';
+import type { EngineDriver, ViewInfo, ColumnInfo, CollectionInfo } from 'dbgate-types';
 import { GridConfig, GridCache } from './GridConfig';
+import { mongoFilterBehaviour, standardFilterBehaviours } from 'dbgate-tools';
 
 function getObjectKeys(obj) {
   if (_.isArray(obj)) {
@@ -52,7 +53,7 @@ function getColumnsForObject(basePath, obj, res: any[], display) {
   }
 }
 
-function getDisplayColumn(basePath, columnName, display) {
+function getDisplayColumn(basePath, columnName, display: CollectionGridDisplay) {
   const uniquePath = [...basePath, columnName];
   const uniqueName = uniquePath.join('.');
   return {
@@ -62,9 +63,13 @@ function getDisplayColumn(basePath, columnName, display) {
     uniquePath,
     isStructured: true,
     parentHeaderText: createHeaderText(basePath),
-    filterType: 'mongo',
+    filterBehaviour: display?.driver?.getFilterBehaviour(null, standardFilterBehaviours) ?? mongoFilterBehaviour,
     pureName: display.collection?.pureName,
     schemaName: display.collection?.schemaName,
+
+    isPartitionKey: !!display?.collection?.partitionKey?.find(x => x.columnName == uniqueName),
+    isClusterKey: !!display?.collection?.clusterKey?.find(x => x.columnName == uniqueName),
+    isUniqueKey: !!display?.collection?.uniqueKey?.find(x => x.columnName == uniqueName),
   };
 }
 
@@ -95,7 +100,8 @@ export class CollectionGridDisplay extends GridDisplay {
     cache: GridCache,
     setCache: ChangeCacheFunc,
     loadedRows,
-    changeSet
+    changeSet,
+    readOnly = false
   ) {
     super(config, setConfig, cache, setCache, driver);
     const changedDocs = _.compact(changeSet.updates.map(chs => chs.document));
@@ -103,10 +109,10 @@ export class CollectionGridDisplay extends GridDisplay {
     this.columns = analyseCollectionDisplayColumns([...(loadedRows || []), ...changedDocs, ...insertedDocs], this);
     this.filterable = true;
     this.sortable = true;
-    this.editable = true;
+    this.editable = !readOnly && collection?.uniqueKey?.length > 0;
     this.supportsReload = true;
     this.isDynamicStructure = true;
-    this.changeSetKeyFields = ['_id'];
+    this.changeSetKeyFields = collection?.uniqueKey?.map(x => x.columnName);
     this.baseCollection = collection;
   }
 }

@@ -1,5 +1,6 @@
+import { ChangeSet, MacroDefinition, MacroSelectedCell, runMacroOnRow } from 'dbgate-datalib';
+
 import {
-  ChangeSet,
   changeSetContainsChanges,
   changeSetInsertNewRow,
   createChangeSet,
@@ -7,8 +8,6 @@ import {
   findExistingChangeSetItem,
   getChangeSetInsertedRows,
   GridDisplay,
-  MacroDefinition,
-  MacroSelectedCell,
   revertChangeSetRowChanges,
   setChangeSetValue,
   setChangeSetRowData,
@@ -16,7 +15,9 @@ import {
   runMacroOnValue,
   changeSetInsertDocuments,
 } from 'dbgate-datalib';
-import Grider, { GriderRowStatus } from './Grider';
+import Grider from './Grider';
+import type { GriderRowStatus } from './Grider';
+import _ from 'lodash';
 
 function getRowFromItem(row, matchedChangeSetItem) {
   return matchedChangeSetItem.document
@@ -38,7 +39,7 @@ export default class ChangeSetGrider extends Grider {
   private rowStatusCache;
   private rowDefinitionsCache;
   private batchChangeSet: ChangeSet;
-  private _errors = null;
+  private _errors = [];
   private compiledMacroFunc;
 
   constructor(
@@ -48,7 +49,8 @@ export default class ChangeSetGrider extends Grider {
     public display: GridDisplay,
     public macro: MacroDefinition = null,
     public macroArgs: {} = {},
-    public selectedCells: MacroSelectedCell[] = []
+    public selectedCells: MacroSelectedCell[] = [],
+    public useRowIndexInsteaOfCondition: boolean = false
   ) {
     super();
     this.changeSet = changeSetState && changeSetState.value;
@@ -81,9 +83,14 @@ export default class ChangeSetGrider extends Grider {
     if (this.rowCacheIndexes.has(index)) return;
     const row = this.getRowSource(index);
     const insertedRowIndex = this.getInsertedRowIndex(index);
-    const rowDefinition = this.display?.getChangeSetRow(row, insertedRowIndex);
+    const rowDefinition = this.display?.getChangeSetRow(
+      row,
+      insertedRowIndex,
+      this.useRowIndexInsteaOfCondition && index < this.sourceRows.length ? index : null,
+      this.useRowIndexInsteaOfCondition
+    );
     const [matchedField, matchedChangeSetItem] = findExistingChangeSetItem(this.changeSet, rowDefinition);
-    const rowUpdated = matchedChangeSetItem
+    let rowUpdated = matchedChangeSetItem
       ? getRowFromItem(row, matchedChangeSetItem)
       : this.compiledMacroFunc
       ? { ...row }
@@ -99,18 +106,32 @@ export default class ChangeSetGrider extends Grider {
     };
 
     if (this.compiledMacroFunc) {
-      for (const cell of this.selectedCells) {
-        if (cell.row != index) continue;
-        const newValue = runMacroOnValue(
-          this.compiledMacroFunc,
-          this.macroArgs,
-          rowUpdated[cell.column],
-          index,
-          rowUpdated,
-          cell.column,
-          this._errors
-        );
-        rowUpdated[cell.column] = newValue;
+      if (this.macro?.type == 'transformValue') {
+        for (const cell of this.selectedCells) {
+          if (cell.row != index) continue;
+          const newValue = runMacroOnValue(
+            this.compiledMacroFunc,
+            this.macroArgs,
+            rowUpdated[cell.column],
+            index,
+            rowUpdated,
+            cell.column,
+            this._errors
+          );
+          rowUpdated[cell.column] = newValue;
+        }
+      }
+      if (this.macro?.type == 'transformRow') {
+        if (this.selectedCells.find(x => x.row == index)) {
+          rowUpdated = runMacroOnRow(
+            this.compiledMacroFunc,
+            this.macroArgs,
+            index,
+            rowUpdated,
+            _.uniq(this.selectedCells.map(x => x.column)),
+            this._errors
+          );
+        }
       }
     }
 
@@ -125,7 +146,7 @@ export default class ChangeSetGrider extends Grider {
   }
 
   get canInsert() {
-    return !!this.display.baseTableOrCollection;
+    return this.useRowIndexInsteaOfCondition || !!this.display.baseTableOrCollection;
   }
 
   getRowData(index: number) {
@@ -152,13 +173,23 @@ export default class ChangeSetGrider extends Grider {
 
   setCellValue(index: number, uniqueName: string, value: any) {
     const row = this.getRowSource(index);
-    const definition = this.display.getChangeSetField(row, uniqueName, this.getInsertedRowIndex(index));
+    const definition = this.display.getChangeSetField(
+      row,
+      uniqueName,
+      this.getInsertedRowIndex(index),
+      this.useRowIndexInsteaOfCondition && index < this.sourceRows.length ? index : null,
+      this.useRowIndexInsteaOfCondition
+    );
     this.applyModification(chs => setChangeSetValue(chs, definition, value));
   }
 
   setRowData(index: number, document: any) {
     const row = this.getRowSource(index);
-    const definition = this.display.getChangeSetRow(row, this.getInsertedRowIndex(index));
+    const definition = this.display.getChangeSetRow(
+      row,
+      this.getInsertedRowIndex(index),
+      this.useRowIndexInsteaOfCondition && index < this.sourceRows.length ? index : null
+    );
     this.applyModification(chs => setChangeSetRowData(chs, definition, document));
   }
 

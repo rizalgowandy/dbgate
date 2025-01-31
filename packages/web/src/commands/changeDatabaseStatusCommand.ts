@@ -2,9 +2,8 @@ import _ from 'lodash';
 import { currentDatabase, getCurrentDatabase } from '../stores';
 import getElectron from '../utility/getElectron';
 import registerCommand from './registerCommand';
-import axiosInstance from '../utility/axiosInstance';
-
-const electron = getElectron();
+import { apiCall } from '../utility/api';
+import { switchCurrentDatabase } from '../utility/common';
 
 registerCommand({
   id: 'database.changeState',
@@ -20,22 +19,29 @@ registerCommand({
     };
     return [
       {
-        text: 'Sync model',
+        text: 'Sync model (incremental)',
         onClick: () => {
-          axiosInstance.post('database-connections/sync-model', dbid);
+          apiCall('database-connections/sync-model', dbid);
+        },
+      },
+      {
+        text: 'Sync model (full)',
+        onClick: () => {
+          apiCall('database-connections/sync-model', { ...dbid, isFullRefresh: true });
         },
       },
       {
         text: 'Reopen',
         onClick: () => {
-          axiosInstance.post('database-connections/refresh', dbid);
+          apiCall('database-connections/refresh', dbid);
         },
       },
       {
         text: 'Disconnect',
         onClick: () => {
-          if (electron) axiosInstance.post('database-connections/disconnect', dbid);
-          currentDatabase.set(null);
+          const electron = getElectron();
+          if (electron) apiCall('database-connections/disconnect', dbid);
+          switchCurrentDatabase(null);
         },
       },
     ];

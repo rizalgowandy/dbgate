@@ -1,9 +1,3 @@
-let axios;
-
-function initialize(dbgateEnv) {
-  axios = dbgateEnv.axios;
-}
-
 const fileFormat = {
   packageName: 'dbgate-plugin-excel',
   // file format identifier
@@ -17,15 +11,15 @@ const fileFormat = {
   // function name from backend, which contains writer factory, postfixed by package name
   writerFunc: 'writer@dbgate-plugin-excel',
 
-  addFileToSourceList: async ({ fileName }, newSources, newValues) => {
-    const resp = await axios.post('plugins/command', {
+  addFileToSourceList: async ({ fileName }, newSources, newValues, apiCall) => {
+    const resp = await apiCall('plugins/command', {
       command: 'analyse',
       packageName: 'dbgate-plugin-excel',
       args: {
         fileName,
       },
     });
-    const sheetNames = resp.data;
+    const sheetNames = resp;
     for (const sheetName of sheetNames) {
       newSources.push(sheetName);
       newValues[`sourceFile_${sheetName}`] = {
@@ -85,5 +79,4 @@ export default {
       }),
     },
   ],
-  initialize,
 };

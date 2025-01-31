@@ -1,5 +1,5 @@
 <script lang="ts">
-  import InlineButton from '../elements/InlineButton.svelte';
+  import InlineButton from '../buttons/InlineButton.svelte';
   import TextField from '../forms/TextField.svelte';
   import FontIcon from '../icons/FontIcon.svelte';
   import { createEventDispatcher } from 'svelte';
@@ -22,7 +22,7 @@
 <div class="wrapper">
   <InlineButton
     on:click={() => {
-      skip -= limit;
+      skip = parseInt(skip) - parseInt(limit);
       if (skip < 0) skip = 0;
       dispatch('load');
     }}
@@ -35,7 +35,7 @@
   <TextField type="number" bind:value={limit} on:blur={() => dispatch('load')} on:keydown={handleKeyDown} />
   <InlineButton
     on:click={() => {
-      skip += limit;
+      skip = parseInt(skip) + parseInt(limit);
       dispatch('load');
     }}
   >

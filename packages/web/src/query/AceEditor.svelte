@@ -1,3 +1,63 @@
+<script lang="ts" context="module">
+  export const EDITOR_THEMES = [
+    'ambiance',
+    'chaos',
+    'chrome',
+    'clouds',
+    'clouds_midnight',
+    'cobalt',
+    'crimson_editor',
+    'dawn',
+    'dracula',
+    'dreamweaver',
+    'eclipse',
+    'github',
+    'gob',
+    'gruvbox',
+    'idle_fingers',
+    'iplastic',
+    'katzenmilch',
+    'kr_theme',
+    'kuroir',
+    'merbivore',
+    'merbivore_soft',
+    'mono_industrial',
+    'monokai',
+    'nord_dark',
+    'pastel_on_dark',
+    'solarized_dark',
+    'solarized_light',
+    'sqlserver',
+    'terminal',
+    'textmate',
+    'tomorrow',
+    'tomorrow_night_blue',
+    'tomorrow_night_bright',
+    'tomorrow_night_eighties',
+    'tomorrow_night',
+    'twilight',
+  ];
+
+  export const EDITOR_KEYBINDINGS_MODES = [
+    { label: 'Default', value: 'default' },
+    { label: 'Vim', value: 'vim' },
+  ];
+
+  export const FONT_SIZES = [
+    { label: '8', value: '8' },
+    { label: '9', value: '9' },
+    { label: '10', value: '10' },
+    { label: '11', value: '11' },
+    { label: '12 - Normal', value: '12' },
+    { label: '13', value: '13' },
+    { label: '14', value: '14' },
+    { label: '15', value: '15' },
+    { label: '16', value: '16' },
+    { label: '17', value: '17' },
+    { label: 'Custom', value: 'custom' },
+  ];
+</script>
+
 <script lang="ts">
   // copied from https://github.com/nateshmbhat/svelte-ace/blob/main/src/AceEditor.svelte
   import { createEventDispatcher, tick, onMount, onDestroy, getContext } from 'svelte';
@@ -11,23 +71,71 @@
   import 'ace-builds/src-noconflict/mode-json';
   import 'ace-builds/src-noconflict/mode-javascript';
   import 'ace-builds/src-noconflict/mode-yaml';
+  import 'ace-builds/src-noconflict/mode-xml';
+  import 'ace-builds/src-noconflict/mode-html';
   import 'ace-builds/src-noconflict/mode-markdown';
   import 'ace-builds/src-noconflict/ext-searchbox';
   import 'ace-builds/src-noconflict/ext-language_tools';
 
-  import 'ace-builds/src-noconflict/theme-github';
+  // import 'ace-builds/src-noconflict/theme-github';
   // import 'ace-builds/src-noconflict/theme-sqlserver';
 
-  import 'ace-builds/src-noconflict/theme-twilight';
+  // import 'ace-builds/src-noconflict/theme-twilight';
   // import 'ace-builds/src-noconflict/theme-monokai';
+  // import 'ace-builds/src-noconflict/theme-chaos';
+  // import 'ace-builds/src-noconflict/theme-merbivore';
 
-  import { currentDropDownMenu, currentThemeDefinition } from '../stores';
+  import 'ace-builds/src-noconflict/theme-ambiance';
+  import 'ace-builds/src-noconflict/theme-chaos';
+  import 'ace-builds/src-noconflict/theme-chrome';
+  import 'ace-builds/src-noconflict/theme-clouds';
+  import 'ace-builds/src-noconflict/theme-clouds_midnight';
+  import 'ace-builds/src-noconflict/theme-cobalt';
+  import 'ace-builds/src-noconflict/theme-crimson_editor';
+  import 'ace-builds/src-noconflict/theme-dawn';
+  import 'ace-builds/src-noconflict/theme-dracula';
+  import 'ace-builds/src-noconflict/theme-dreamweaver';
+  import 'ace-builds/src-noconflict/theme-eclipse';
+  import 'ace-builds/src-noconflict/theme-github';
+  import 'ace-builds/src-noconflict/theme-gob';
+  import 'ace-builds/src-noconflict/theme-gruvbox';
+  import 'ace-builds/src-noconflict/theme-idle_fingers';
+  import 'ace-builds/src-noconflict/theme-iplastic';
+  import 'ace-builds/src-noconflict/theme-katzenmilch';
+  import 'ace-builds/src-noconflict/theme-kr_theme';
+  import 'ace-builds/src-noconflict/theme-kuroir';
+  import 'ace-builds/src-noconflict/theme-merbivore';
+  import 'ace-builds/src-noconflict/theme-merbivore_soft';
+  import 'ace-builds/src-noconflict/theme-mono_industrial';
+  import 'ace-builds/src-noconflict/theme-monokai';
+  import 'ace-builds/src-noconflict/theme-nord_dark';
+  import 'ace-builds/src-noconflict/theme-pastel_on_dark';
+  import 'ace-builds/src-noconflict/theme-solarized_dark';
+  import 'ace-builds/src-noconflict/theme-solarized_light';
+  import 'ace-builds/src-noconflict/theme-sqlserver';
+  import 'ace-builds/src-noconflict/theme-terminal';
+  import 'ace-builds/src-noconflict/theme-textmate';
+  import 'ace-builds/src-noconflict/theme-tomorrow';
+  import 'ace-builds/src-noconflict/theme-tomorrow_night_blue';
+  import 'ace-builds/src-noconflict/theme-tomorrow_night_bright';
+  import 'ace-builds/src-noconflict/theme-tomorrow_night_eighties';
+  import 'ace-builds/src-noconflict/theme-tomorrow_night';
+  import 'ace-builds/src-noconflict/theme-twilight';
+  import 'ace-builds/src-noconflict/keybinding-vim';
+
+  import {
+    currentDropDownMenu,
+    currentEditorFontSize,
+    currentEditorFont,
+    currentEditorTheme,
+    currentThemeDefinition,
+    currentEditorKeybindigMode,
+  } from '../stores';
   import _ from 'lodash';
   import { handleCommandKeyDown } from '../commands/CommandListener.svelte';
   import resizeObserver from '../utility/resizeObserver';
-  // @ts-ignore
-  import QueryParserWorker from 'web-worker:./QueryParserWorker';
   import queryParserWorkerFallback from './queryParserWorkerFallback';
+  import { key } from 'localforage';
 
   const EDITOR_ID = `svelte-ace-editor-div:${Math.floor(Math.random() * 10000000000)}`;
   const dispatch = createEventDispatcher<{
@@ -56,6 +164,9 @@
   export let menu = null;
   export let readOnly = false;
   export let splitterOptions = null;
+  export let onKeyDown = null;
+  export let onExecuteFragment = null;
+  export let errorMessages = null;
 
   const tabVisible: any = getContext('tabVisible');
 
@@ -67,30 +178,45 @@
 
   let queryParts = [];
   let currentPart = null;
-  let currentPartMarker = null;
+  let currentPartLines = [];
+  // let currentPartMarker = null;
 
   let queryParserWorker;
+
+  let defaultFontSize;
 
   const stdOptions = {
     showPrintMargin: false,
   };
 
-  $: theme = $currentThemeDefinition?.themeType == 'dark' ? 'twilight' : 'github';
+  $: theme = $currentEditorTheme || ($currentThemeDefinition?.themeType == 'dark' ? 'merbivore' : 'github');
+  $: keyBindingMode = $currentEditorKeybindigMode || null;
+  $: watchEditorFontSize($currentEditorFontSize);
 
   export function getEditor(): ace.Editor {
     return editor;
   }
 
-  export function getCurrentCommandText(): string {
-    if (currentPart != null) return currentPart.text;
-    if (!editor) return '';
-    const selectedText = editor.getSelectedText();
-    if (selectedText) return selectedText;
-    if (editor.getHighlightActiveLine()) {
-      const line = editor.getSelectionRange().start.row;
-      return editor.session.getLine(line);
+  export function getCurrentCommandText(): { text: string; line?: number } {
+    if (currentPart != null) {
+      return {
+        text: currentPart.text,
+        line: currentPart.trimStart.line,
+      };
     }
-    return '';
+    if (!editor) return { text: '' };
+    const selectedText = editor.getSelectedText();
+    if (selectedText) {
+      return {
+        text: selectedText,
+        line: editor.getSelectionRange().start.row,
+      };
+    }
+    const line = editor.getSelectionRange().start.row;
+    return {
+      text: editor.session.getLine(line),
+      line,
+    };
   }
 
   export function getCodeCompletionCommandText() {
@@ -109,10 +235,27 @@
     }
   }
 
+  function watchEditorFontSize(value) {
+    if (editor) {
+      editor.setFontSize(value ? parseInt(value) : defaultFontSize);
+    }
+  }
+
   $: watchTheme(theme);
   function watchTheme(newTheme: string) {
     if (editor) {
       editor.setTheme('ace/theme/' + newTheme);
+    }
+  }
+
+  $: watchKeyBindingMode(keyBindingMode);
+  function watchKeyBindingMode(newMode: string) {
+    if (editor) {
+      if (newMode == 'default') {
+        editor.setKeyboardHandler(null);
+      } else {
+        editor.setKeyboardHandler('ace/keyboard/' + newMode);
+      }
     }
   }
 
@@ -123,12 +266,15 @@
     }
   }
 
-  $: watchOptions(options);
-  function watchOptions(newOption: any) {
+  $: watchOptions(options, $currentEditorFont);
+  function watchOptions(newOption: any, fontFamily) {
     if (editor) {
       editor.setOptions({
         ...stdOptions,
         ...newOption,
+        fontFamily: fontFamily || 'Menlo, Monaco, Ubuntu Mono, Consolas, source-code-pro, monospace',
+        // fontFamily: 'tahoma,Menlo',
+        // fontSize: '10pt',
       });
     }
   }
@@ -138,11 +284,14 @@
     if (enabled) {
       if (!queryParserWorker) {
         try {
-          queryParserWorker = new QueryParserWorker();
+          queryParserWorker = new Worker('build/query-parser-worker.js');
+          // console.log('WORKER', queryParserWorker);
           queryParserWorker.onmessage = e => {
             processParserResult(e.data);
           };
         } catch (err) {
+          // console.error('WORKER ERROR', err);
+          console.log('WORKER ERROR, using fallback worker', err.message);
           queryParserWorker = 'fallback';
         }
       }
@@ -171,8 +320,37 @@
 
   function processParserResult(data) {
     queryParts = data;
-    editor.setHighlightActiveLine(queryParts.length <= 1);
+    // editor.setHighlightActiveLine(queryParts.length <= 1);
     changedCurrentQueryPart();
+    updateAnnotations();
+  }
+
+  function updateAnnotations() {
+    if (!mode?.includes('sql')) return;
+
+    // console.log('UPDATING ANNOTATIONS');
+
+    editor?.session?.setAnnotations([
+      ...(queryParts || [])
+        .filter(part => !(errorMessages || []).find(err => err.line == part.trimStart.line))
+        .map(part => ({
+          row: part.trimStart.line,
+          text: part.text,
+          className: currentPartLines.includes(part.trimStart.line)
+            ? 'ace-gutter-sql-run ace-gutter-current-part'
+            : 'ace-gutter-sql-run', // className: 'ace-gutter-sql-run',
+        })),
+      ...(errorMessages || []).map(error => ({
+        row: error.line,
+        text: error.message,
+        type: 'error',
+      })),
+    ]);
+  }
+
+  $: {
+    errorMessages;
+    updateAnnotations();
   }
 
   const handleContextMenu = e => {
@@ -184,13 +362,12 @@
 
   const handleKeyDown = (data, hash, keyString, keyCode, event) => {
     if (event) handleCommandKeyDown(event);
+    if (onKeyDown && event) onKeyDown(event);
   };
 
   function changedQueryParts() {
     const editor = getEditor();
     if (splitterOptions && editor && queryParserWorker) {
-      const editor = getEditor();
-
       const message = {
         text: editor.getValue(),
         options: {
@@ -214,19 +391,20 @@
   function changedCurrentQueryPart() {
     if (queryParts.length <= 1) {
       removeCurrentPartMarker();
+      updateAnnotations();
       return;
     }
 
     const selectionRange = editor.getSelectionRange();
 
-    if (
-      selectionRange.start.row != selectionRange.end.row ||
-      selectionRange.start.column != selectionRange.end.column
-    ) {
-      removeCurrentPartMarker();
-      currentPart = null;
-      return;
-    }
+    // if (
+    //   selectionRange.start.row != selectionRange.end.row ||
+    //   selectionRange.start.column != selectionRange.end.column
+    // ) {
+    //   removeCurrentPartMarker();
+    //   currentPart = null;
+    //   return;
+    // }
 
     const cursor = selectionRange.start;
     const part = queryParts.find(
@@ -234,25 +412,40 @@
         ((cursor.row == x.start.line && cursor.column >= x.start.column) || cursor.row > x.start.line) &&
         ((cursor.row == x.end.line && cursor.column <= x.end.column) || cursor.row < x.end.line)
     );
-    if (part?.text != currentPart?.text) {
+
+    if (
+      part?.text != currentPart?.text ||
+      part?.start?.position != currentPart?.start?.position ||
+      part?.end?.position != currentPart?.end?.position
+    ) {
       removeCurrentPartMarker();
 
       currentPart = part;
       if (currentPart) {
         const start = currentPart.trimStart || currentPart.start;
         const end = currentPart.trimEnd || currentPart.end;
-        currentPartMarker = editor
-          .getSession()
-          .addMarker(new ace.Range(start.line, start.column, end.line, end.column), 'ace_active-line', 'text');
+        if (start && end) {
+          currentPartLines = _.range(start.line, end.line + 1);
+          for (const row of currentPartLines) {
+            if ((queryParts || []).find(part => part.trimStart.line == row)) {
+              continue;
+            }
+            editor.getSession().addGutterDecoration(row, 'ace-gutter-current-part');
+          }
+        }
+        // currentPartMarker = editor
+        //   .getSession()
+        //   .addMarker(new ace.Range(start.line, start.column, end.line, end.column), 'ace_active-line', 'text');
       }
+      updateAnnotations();
     }
   }
 
   function removeCurrentPartMarker() {
-    if (currentPartMarker != null) {
-      editor.getSession().removeMarker(currentPartMarker);
-      currentPartMarker = null;
+    for (const row of currentPartLines) {
+      editor.getSession().removeGutterDecoration(row, 'ace-gutter-current-part');
     }
+    currentPartLines = [];
   }
 
   onMount(() => {
@@ -264,6 +457,7 @@
     editor.getSession().setMode('ace/mode/' + mode);
     editor.setTheme('ace/theme/' + theme);
     editor.setValue(value, 1);
+    editor.setHighlightActiveLine(false);
     contentBackup = value;
     setEventCallBacks();
     if (options) {
@@ -275,7 +469,80 @@
 
     editor.container.addEventListener('contextmenu', handleContextMenu);
     editor.keyBinding.addKeyboardHandler(handleKeyDown);
+    editor.setKeyboardHandler(keyBindingMode == 'default' ? null : 'ace/keyboard/' + keyBindingMode);
+    editor.renderer.setScrollMargin(2, 0);
     changedQueryParts();
+
+    // editor.session.addGutterDecoration(0, 'ace-gutter-sql-run');
+
+    // editor.session.setAnnotations([
+    //   {
+    //     row: 1,
+    //     text: 'SQL SCRIPT 0',
+    //     type: 'gutter',
+    //   },
+    // ]);
+
+    // editor.getSession().setAnnotations([
+    //   {
+    //     row: 0,
+    //     // column: 0,
+    //     text: 'Error Message', // Or the Json reply from the parser
+    //     type: 'error', // also "warning" and "information"
+    //   },
+    //   {
+    //     row: 1,
+    //     // column: 0,
+    //     text: 'SELECT * FROM \n22222', // Or the Json reply from the parser
+    //     // type: 'info', // also "warning" and "information"
+    //     className: 'ace-gutter-sql-run',
+    //   },
+    // ]);
+
+    // editor.on('guttermousemove', e => console.log('MOVE', e.target), true);
+    // editor.on('guttermouseout', e => console.log('OUT', e.target), true);
+    // editor.on('guttermouseleave', e => console.log('LEAVE', e.target), true);
+    // editor.session.setBreakpoint(0);
+
+    // editor.on(
+    //   'gutterclick',
+    //   e => {
+    //     const row = e.getDocumentPosition().row;
+
+    //     const part = (queryParts || []).find(part => part.trimStart.line == row);
+    //     if (part && onExecuteFragment) {
+    //       onExecuteFragment(part.text);
+    //       e.stop();
+    //     }
+    //   },
+    //   true
+    // );
+
+    editor.on(
+      'guttermousedown',
+      e => {
+        const row = e.getDocumentPosition().row;
+
+        const part = (queryParts || []).find(part => part.trimStart.line == row);
+        if (part && onExecuteFragment) {
+          onExecuteFragment(part.text, part.trimStart.line);
+          e.stop();
+          editor.moveCursorTo(part.trimStart.line, 0);
+          editor.selection.clearSelection();
+        }
+      },
+      true
+    );
+
+    // editor.session.gutterRenderer = {
+    //   getWidth: function (session, lastLineNumber, config) {
+    //     return lastLineNumber.toString().length * config.characterWidth;
+    //   },
+    //   getText: function (session, row) {
+    //     return (row + 1).toString();
+    //     // return String.fromCharCode(row + 65);
+    //   },
+    // };
   });
 
   onDestroy(() => {
@@ -311,6 +578,7 @@
     editor.on('focus', () => dispatch('focus'));
 
     editor.setReadOnly(readOnly);
+
     editor.on('change', () => {
       const content = editor.getValue();
       value = content;
@@ -318,6 +586,10 @@
       contentBackup = content;
       changedQueryParts();
     });
+    defaultFontSize = editor.getFontSize();
+    if ($currentEditorFontSize) {
+      editor.setFontSize(parseInt($currentEditorFontSize) || 12);
+    }
 
     editor.on('changeSelection', () => {
       changedCurrentQueryPart();

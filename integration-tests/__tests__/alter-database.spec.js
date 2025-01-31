@@ -1,25 +1,35 @@
 const stableStringify = require('json-stable-stringify');
 const _ = require('lodash');
 const fp = require('lodash/fp');
-const uuidv1 = require('uuid/v1');
 const { testWrapper } = require('../tools');
 const engines = require('../engines');
-const { getAlterDatabaseScript, extendDatabaseInfo, generateDbPairingId } = require('dbgate-tools');
+const {
+  getAlterDatabaseScript,
+  extendDatabaseInfo,
+  generateDbPairingId,
+  formatQueryWithoutParams,
+  runCommandOnDriver,
+} = require('dbgate-tools');
 
-function flatSource() {
+const initSql = ['CREATE TABLE ~t1 (~id int primary key)', 'CREATE TABLE ~t2 (~id int primary key)'];
+
+function flatSource(engineCond = x => !x.skipReferences) {
   return _.flatten(
-    engines.map(engine => (engine.objects || []).map(object => [engine.label, object.type, object, engine]))
+    engines
+      .filter(engineCond)
+      .map(engine => (engine.objects || []).map(object => [engine.label, object.type, object, engine]))
   );
 }
 
 async function testDatabaseDiff(conn, driver, mangle, createObject = null) {
-  await driver.query(conn, `create table t1 (id int not null primary key)`);
+  await runCommandOnDriver(conn, driver, `create table ~t1 (~id int not null primary key)`);
 
-  await driver.query(
+  await runCommandOnDriver(
     conn,
-    `create table t2 (
-    id int not null primary key, 
-    t1_id int null references t1(id)
+    driver,
+    `create table ~t2 (
+    ~id int not null primary key, 
+    ~t1_id int null references ~t1(~id)
   )`
   );
 
@@ -42,7 +52,7 @@ async function testDatabaseDiff(conn, driver, mangle, createObject = null) {
 }
 
 describe('Alter database', () => {
-  test.each(engines.map(engine => [engine.label, engine]))(
+  test.each(engines.filter(x => !x.skipReferences).map(engine => [engine.label, engine]))(
     'Drop referenced table - %s',
     testWrapper(async (conn, driver, engine) => {
       await testDatabaseDiff(conn, driver, db => {
@@ -60,9 +70,32 @@ describe('Alter database', () => {
         db => {
           _.remove(db[type], x => x.pureName == 'obj1');
         },
-        object.create1
+        formatQueryWithoutParams(driver, object.create1)
       );
       expect(db[type].length).toEqual(0);
     })
   );
+
+  const objectsSupportingRename = flatSource(x => x.supportRenameSqlObject);
+  if (objectsSupportingRename.length > 0) {
+    test.each(objectsSupportingRename)(
+      'Rename object - %s - %s',
+      testWrapper(async (conn, driver, type, object, engine) => {
+        for (const sql of initSql) await runCommandOnDriver(conn, driver, sql);
+
+        await runCommandOnDriver(conn, driver, object.create1);
+
+        const structure = extendDatabaseInfo(await driver.analyseFull(conn));
+
+        const dmp = driver.createDumper();
+        dmp.renameSqlObject(structure[type][0], 'renamed1');
+
+        await driver.query(conn, dmp.s);
+
+        const structure2 = await driver.analyseFull(conn);
+        expect(structure2[type].length).toEqual(1);
+        expect(structure2[type][0].pureName).toEqual('renamed1');
+      })
+    );
+  }
 });

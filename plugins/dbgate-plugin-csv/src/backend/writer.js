@@ -2,6 +2,10 @@ const csv = require('csv');
 const fs = require('fs');
 const stream = require('stream');
 
+const { getLogger } = global.DBGATE_PACKAGES['dbgate-tools'];
+
+const logger = getLogger('csvWriter');
+
 class CsvPrepareStream extends stream.Transform {
   constructor({ header }) {
     super({ objectMode: true });
@@ -23,13 +27,14 @@ class CsvPrepareStream extends stream.Transform {
 }
 
 async function writer({ fileName, encoding = 'utf-8', header = true, delimiter, quoted }) {
-  console.log(`Writing file ${fileName}`);
+  logger.info(`Writing file ${fileName}`);
   const csvPrepare = new CsvPrepareStream({ header });
   const csvStream = csv.stringify({ delimiter, quoted });
   const fileStream = fs.createWriteStream(fileName, encoding);
   csvPrepare.pipe(csvStream);
   csvStream.pipe(fileStream);
   csvPrepare['finisher'] = fileStream;
+  csvPrepare.requireFixedStructure = true;
   return csvPrepare;
 }
 

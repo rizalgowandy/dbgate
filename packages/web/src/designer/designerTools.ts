@@ -1,10 +1,11 @@
 import _ from 'lodash';
-import { dumpSqlSelect, Select, JoinType, Condition, Relation, mergeConditions, Source } from 'dbgate-sqltree';
-import { EngineDriver } from 'dbgate-types';
-import { DesignerInfo, DesignerTableInfo, DesignerReferenceInfo, DesignerJoinType } from './types';
+import type { Select, Condition, Source } from 'dbgate-sqltree';
+import { dumpSqlSelect, mergeConditions } from 'dbgate-sqltree';
+import type { EngineDriver } from 'dbgate-types';
+import type { DesignerInfo, DesignerTableInfo, DesignerReferenceInfo, DesignerJoinType } from './types';
 import { DesignerComponentCreator } from './DesignerComponentCreator';
 import { DesignerQueryDumper } from './DesignerQueryDumper';
-import { getFilterType } from 'dbgate-filterparser';
+import { detectSqlFilterBehaviour } from 'dbgate-tools';
 
 export function referenceIsConnecting(
   reference: DesignerReferenceInfo,
@@ -106,6 +107,7 @@ export function generateDesignedQuery(designer: DesignerInfo, engine: EngineDriv
   const componentCreator = new DesignerComponentCreator(designer);
   const designerDumper = new DesignerQueryDumper(designer, componentCreator.components);
   const select = designerDumper.run();
+  select.distinct = !!designer?.settings?.isDistinct;
 
   const dmp = engine.createDumper();
   dumpSqlSelect(dmp, select);
@@ -131,13 +133,13 @@ export function isConnectedByReference(
   return array1 == array2;
 }
 
-export function findDesignerFilterType({ designerId, columnName }, designer) {
+export function findDesignerFilterBehaviour({ designerId, columnName }, designer) {
   const table = (designer.tables || []).find(x => x.designerId == designerId);
   if (table) {
     const column = (table.columns || []).find(x => x.columnName == columnName);
     if (column) {
       const { dataType } = column;
-      return getFilterType(dataType);
+      return detectSqlFilterBehaviour(dataType);
     }
   }
   return 'string';

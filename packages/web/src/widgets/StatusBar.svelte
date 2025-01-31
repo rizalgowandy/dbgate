@@ -1,47 +1,26 @@
-<script lang="ts" context="module">
-  const statusBarTabInfo = writable({});
-
-  // export function updateStatuBarInfo(tabid, info) {
-  //   statusBarTabInfo.update(x => ({
-  //     ...x,
-  //     [tabid]: info,
-  //   }));
-  // }
-
-  export function updateStatuBarInfoItem(tabid, key, item) {
-    statusBarTabInfo.update(tabs => {
-      const items = tabs[tabid] || [];
-      let newItems;
-      if (item == null) {
-        newItems = items.filter(x => x.key != key);
-      } else if (items.find(x => x.key == key)) {
-        newItems = items.map(x => (x.key == key ? { ...item, key } : x));
-      } else {
-        newItems = [...items, { ...item, key }];
-      }
-      return {
-        ...tabs,
-        [tabid]: newItems,
-      };
-    });
-  }
-</script>
-
 <script lang="ts">
   import _ from 'lodash';
-  import { writable } from 'svelte/store';
   import moment from 'moment';
   import { showModal } from '../modals/modalTools';
   import ChooseConnectionColorModal from '../modals/ChooseConnectionColorModal.svelte';
 
   import FontIcon from '../icons/FontIcon.svelte';
 
-  import { activeTabId, currentDatabase, currentThemeDefinition, visibleCommandPalette } from '../stores';
-  import getConnectionLabel from '../utility/getConnectionLabel';
+  import {
+    activeTabId,
+    appUpdateStatus,
+    currentArchive,
+    currentDatabase,
+    currentThemeDefinition,
+    selectedWidget,
+    visibleCommandPalette,
+  } from '../stores';
+  import { getConnectionLabel } from 'dbgate-tools';
   import { useConnectionList, useDatabaseServerVersion, useDatabaseStatus } from '../utility/metadataLoaders';
-  import axiosInstance from '../utility/axiosInstance';
   import { findCommand } from '../commands/runCommand';
   import { useConnectionColor } from '../utility/useConnectionColor';
+  import { apiCall } from '../utility/api';
+  import { statusBarTabInfo } from '../utility/statusBarStore';
 
   $: databaseName = $currentDatabase && $currentDatabase.name;
   $: connection = $currentDatabase && $currentDatabase.connection;
@@ -64,7 +43,7 @@
 
   async function handleSyncModel() {
     if (connection && databaseName) {
-      await axiosInstance.post('database-connections/sync-model', { conid: connection._id, database: databaseName });
+      await apiCall('database-connections/sync-model', { conid: connection._id, database: databaseName });
     }
   }
 </script>
@@ -73,7 +52,11 @@
   <div class="container">
     {#if databaseName}
       <div class="item">
-        <FontIcon icon="icon database" padRight />
+        {#if connection?.isReadOnly}
+          <FontIcon icon="icon lock" padRight />
+        {:else}
+          <FontIcon icon="icon database" padRight />
+        {/if}
         {databaseName}
       </div>
       {#if dbid}
@@ -165,6 +148,18 @@
         </div>
       </div>
     {/if}
+    {#if $currentArchive}
+      <div
+        class="item flex clickable"
+        title="Current archive"
+        on:click={() => {
+          $selectedWidget = 'archive';
+        }}
+      >
+        <FontIcon icon="icon archive" padRight />
+        {$currentArchive}
+      </div>
+    {/if}
   </div>
   <div class="container">
     {#each contextItems || [] as item}
@@ -175,6 +170,13 @@
         {item.text}
       </div>
     {/each}
+
+    {#if $appUpdateStatus}
+      <div class="item">
+        <FontIcon icon={$appUpdateStatus.icon} padRight />
+        {$appUpdateStatus.message}
+      </div>
+    {/if}
   </div>
 </div>
 
@@ -195,6 +197,7 @@
     padding: 0px 10px;
     display: flex;
     align-items: center;
+    white-space: nowrap;
   }
 
   .version {

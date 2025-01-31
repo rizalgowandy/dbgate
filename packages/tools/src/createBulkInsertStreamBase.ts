@@ -1,8 +1,11 @@
-import { EngineDriver } from 'dbgate-types';
+import { EngineDriver, WriteTableOptions } from 'dbgate-types';
 import _intersection from 'lodash/intersection';
+import { getLogger } from './getLogger';
 import { prepareTableForImport } from './tableTransforms';
 
-export function createBulkInsertStreamBase(driver, stream, pool, name, options): any {
+const logger = getLogger('bulkStreamBase');
+
+export function createBulkInsertStreamBase(driver: EngineDriver, stream, dbhan, name, options: WriteTableOptions): any {
   const fullNameQuoted = name.schemaName
     ? `${driver.dialect.quoteIdentifier(name.schemaName)}.${driver.dialect.quoteIdentifier(name.pureName)}`
     : driver.dialect.quoteIdentifier(name.pureName);
@@ -14,6 +17,7 @@ export function createBulkInsertStreamBase(driver, stream, pool, name, options):
   writable.buffer = [];
   writable.structure = null;
   writable.columnNames = null;
+  writable.requireFixedStructure = driver.databaseEngineTypes.includes('sql');
 
   writable.addRow = async row => {
     if (writable.structure) {
@@ -25,22 +29,22 @@ export function createBulkInsertStreamBase(driver, stream, pool, name, options):
   };
 
   writable.checkStructure = async () => {
-    let structure = await driver.analyseSingleTable(pool, name);
+    let structure = await driver.analyseSingleTable(dbhan, name);
     // console.log('ANALYSING', name, structure);
     if (structure && options.dropIfExists) {
-      console.log(`Dropping table ${fullNameQuoted}`);
-      await driver.query(pool, `DROP TABLE ${fullNameQuoted}`);
+      logger.info(`Dropping table ${fullNameQuoted}`);
+      await driver.script(dbhan, `DROP TABLE ${fullNameQuoted}`);
     }
     if (options.createIfNotExists && (!structure || options.dropIfExists)) {
-      console.log(`Creating table ${fullNameQuoted}`);
       const dmp = driver.createDumper();
-      dmp.createTable(prepareTableForImport({ ...writable.structure, ...name }));
-      console.log(dmp.s);
-      await driver.query(pool, dmp.s);
-      structure = await driver.analyseSingleTable(pool, name);
+      const createdTableInfo = driver.adaptTableInfo(prepareTableForImport({ ...writable.structure, ...name }));
+      dmp.createTable(createdTableInfo);
+      logger.info({ sql: dmp.s }, `Creating table ${fullNameQuoted}`);
+      await driver.script(dbhan, dmp.s);
+      structure = await driver.analyseSingleTable(dbhan, name);
     }
     if (options.truncate) {
-      await driver.query(pool, `TRUNCATE TABLE ${fullNameQuoted}`);
+      await driver.script(dbhan, `TRUNCATE TABLE ${fullNameQuoted}`);
     }
 
     writable.columnNames = _intersection(
@@ -53,24 +57,42 @@ export function createBulkInsertStreamBase(driver, stream, pool, name, options):
     const rows = writable.buffer;
     writable.buffer = [];
 
-    const dmp = driver.createDumper();
+    if (driver.dialect.allowMultipleValuesInsert) {
+      const dmp = driver.createDumper();
+      dmp.putRaw(`INSERT INTO ${fullNameQuoted} (`);
+      dmp.putCollection(',', writable.columnNames, col => dmp.putRaw(driver.dialect.quoteIdentifier(col as string)));
+      dmp.putRaw(')\n VALUES\n');
 
-    dmp.putRaw(`INSERT INTO ${fullNameQuoted} (`);
-    dmp.putCollection(',', writable.columnNames, col => dmp.putRaw(driver.dialect.quoteIdentifier(col)));
-    dmp.putRaw(')\n VALUES\n');
+      let wasRow = false;
+      for (const row of rows) {
+        if (wasRow) dmp.putRaw(',\n');
+        dmp.putRaw('(');
+        dmp.putCollection(',', writable.columnNames, col => dmp.putValue(row[col as string]));
+        dmp.putRaw(')');
+        wasRow = true;
+      }
+      dmp.putRaw(';');
+      // require('fs').writeFileSync('/home/jena/test.sql', dmp.s);
+      // console.log(dmp.s);
+      await driver.query(dbhan, dmp.s, { discardResult: true });
+    } else {
+      for (const row of rows) {
+        const dmp = driver.createDumper();
+        dmp.putRaw(`INSERT INTO ${fullNameQuoted} (`);
+        dmp.putCollection(',', writable.columnNames, col => dmp.putRaw(driver.dialect.quoteIdentifier(col as string)));
+        dmp.putRaw(')\n VALUES\n');
 
-    let wasRow = false;
-    for (const row of rows) {
-      if (wasRow) dmp.putRaw(',\n');
-      dmp.putRaw('(');
-      dmp.putCollection(',', writable.columnNames, col => dmp.putValue(row[col]));
-      dmp.putRaw(')');
-      wasRow = true;
+        dmp.putRaw('(');
+        dmp.putCollection(',', writable.columnNames, col => dmp.putValue(row[col as string]));
+        dmp.putRaw(')');
+        await driver.query(dbhan, dmp.s, { discardResult: true });
+      }
     }
-    dmp.putRaw(';');
-    // require('fs').writeFileSync('/home/jena/test.sql', dmp.s);
-    // console.log(dmp.s);
-    await driver.query(pool, dmp.s);
+    if (options.commitAfterInsert) {
+      const dmp = driver.createDumper();
+      dmp.commitTransaction();
+      await driver.query(dbhan, dmp.s, { discardResult: true });
+    }
   };
 
   writable.sendIfFull = async () => {

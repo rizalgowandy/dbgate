@@ -1,7 +1,8 @@
 import _ from 'lodash';
 import { getContext, setContext } from 'svelte';
 import invalidateCommands from '../commands/invalidateCommands';
-import { currentDropDownMenu } from '../stores';
+import { runGroupCommand } from '../commands/runCommand';
+import { currentDropDownMenu, visibleCommandPalette } from '../stores';
 import getAsArray from './getAsArray';
 
 export function registerMenu(...items) {
@@ -9,19 +10,21 @@ export function registerMenu(...items) {
   setContext('componentContextMenu', [parentMenu, ...items]);
 }
 
-export default function contextMenu(node, items = []) {
+export default function contextMenu(node, items: any = []) {
   const handleContextMenu = async e => {
     e.preventDefault();
     e.stopPropagation();
 
     await invalidateCommands();
-    
+
     if (items) {
       const left = e.pageX;
       const top = e.pageY;
       currentDropDownMenu.set({ left, top, items, targetElement: e.target });
     }
   };
+
+  if (items == '__no_menu') return;
 
   node.addEventListener('contextmenu', handleContextMenu);
 
@@ -81,13 +84,69 @@ function processTags(items) {
   return res;
 }
 
-export function extractMenuItems(menu, options = null) {
+function extractMenuItems(menu, options = null) {
   let res = [];
   doExtractMenuItems(menu, res, options);
+  // console.log('BEFORE PROCESS TAGS', res);
   res = processTags(res);
+  return res;
+}
+
+function mapItem(item, commands) {
+  if (item.command) {
+    const command = commands[item.command];
+    if (command) {
+      return {
+        text: item.text || command.menuName || command.toolbarName || command.name,
+        keyText: command.keyText || command.keyTextFromGroup || command.disableHandleKeyText,
+        onClick: () => {
+          if (command.isGroupCommand) {
+            runGroupCommand(command.group);
+          } else {
+            if (command.getSubCommands) visibleCommandPalette.set(command);
+            else if (command.onClick) command.onClick();
+          }
+        },
+        disabled: !command.enabled,
+        hideDisabled: item.hideDisabled,
+      };
+    }
+    return null;
+  }
+  return item;
+}
+
+function filterMenuItems(items) {
+  const res = [];
+  let wasDivider = false;
+  let wasItem = false;
+  for (const item of items.filter(x => !x.disabled || !x.hideDisabled)) {
+    if (item.divider) {
+      if (wasItem) {
+        wasDivider = true;
+      }
+    } else {
+      if (wasDivider) {
+        res.push({ divider: true });
+      }
+      wasDivider = false;
+      wasItem = true;
+      res.push(item);
+    }
+  }
   return res;
 }
 
 export function getContextMenu(): any {
   return getContext('componentContextMenu');
+}
+
+export function prepareMenuItems(items, options, commandsCustomized) {
+  const extracted = extractMenuItems(items, options);
+  // console.log('EXTRACTED', extracted);
+  const compacted = _.compact(extracted.map(x => mapItem(x, commandsCustomized)));
+  // console.log('COMPACTED', compacted);
+  const filtered = filterMenuItems(compacted);
+  // console.log('FILTERED', filtered);
+  return filtered;
 }

@@ -1,18 +1,21 @@
 <script lang="ts">
   import _ from 'lodash';
-  import DropDownButton from './DropDownButton.svelte';
+  import DropDownButton from '../buttons/DropDownButton.svelte';
 
   interface TabDef {
     label: string;
     slot?: number;
     component?: any;
     props?: any;
+    testid?: string;
   }
 
   export let tabs: TabDef[];
   export let value = 0;
   export let menu = null;
   export let isInline = false;
+  export let containerMaxWidth = undefined;
+  export let flex1 = true;
 
   export function setValue(index) {
     value = index;
@@ -22,10 +25,10 @@
   }
 </script>
 
-<div class="main">
+<div class="main" class:flex1>
   <div class="tabs">
     {#each _.compact(tabs) as tab, index}
-      <div class="tab-item" class:selected={value == index} on:click={() => (value = index)}>
+      <div class="tab-item" class:selected={value == index} on:click={() => (value = index)} data-testid={tab.testid}>
         <span class="ml-2">
           {tab.label}
         </span>
@@ -38,7 +41,7 @@
 
   <div class="content-container">
     {#each _.compact(tabs) as tab, index}
-      <div class="container" class:isInline class:tabVisible={index == value}>
+      <div class="container" class:isInline class:tabVisible={index == value} style:max-width={containerMaxWidth}>
         <svelte:component this={tab.component} {...tab.props} tabControlHiddenTab={index != value} />
         {#if tab.slot != null}
           {#if tab.slot == 0}<slot name="0" />
@@ -59,15 +62,26 @@
 <style>
   .main {
     display: flex;
-    flex: 1;
     flex-direction: column;
+  }
+
+  .main.flex1 {
+    flex: 1;
+    max-width: 100%;
   }
 
   .tabs {
     display: flex;
     height: var(--dim-tabs-height);
+    min-height: var(--dim-tabs-height);
     right: 0;
     background-color: var(--theme-bg-2);
+    overflow-x: auto;
+    max-width: 100%;
+  }
+
+  .tabs::-webkit-scrollbar {
+    height: 7px;
   }
 
   .tab-item {

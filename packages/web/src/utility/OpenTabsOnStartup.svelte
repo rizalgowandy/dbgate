@@ -4,9 +4,10 @@
   import runCommand from '../commands/runCommand';
   import ErrorMessageModal from '../modals/ErrorMessageModal.svelte';
   import { showModal } from '../modals/modalTools';
-  import { openedTabs } from '../stores';
+  import { commandsCustomized, openedTabs } from '../stores';
 
-  import { getConfig, useFavorites } from './metadataLoaders';
+  import { getConfig, getConnectionList, useFavorites } from './metadataLoaders';
+  import openNewTab from './openNewTab';
   import { showSnackbarInfo } from './snackbar';
 
   $: favorites = useFavorites();
@@ -46,6 +47,18 @@
       for (const favorite of list.filter(x => x.openOnStartup)) {
         openFavorite(favorite);
       }
+    }
+
+    if (
+      !$openedTabs.find(x => x.closedTime == null) &&
+      !(await getConnectionList()).length &&
+      $commandsCustomized['new.connection']?.enabled
+    ) {
+      openNewTab({
+        title: 'New Connection',
+        icon: 'img connection',
+        tabComponent: 'ConnectionTab',
+      });
     }
 
     const config = await getConfig();

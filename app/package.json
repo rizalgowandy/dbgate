@@ -1,14 +1,14 @@
 {
   "name": "dbgate",
-  "version": "4.1.1",
+  "version": "6.0.0-alpha.1",
   "private": true,
   "author": "Jan Prochazka <jenasoft.database@gmail.com>",
   "description": "Opensource database administration tool",
   "dependencies": {
-    "better-sqlite3-with-prebuilds": "^7.1.8",
-    "electron-log": "^4.3.1",
-    "electron-store": "^5.1.1",
-    "electron-updater": "^4.3.5",
+    "electron-log": "^4.4.1",
+    "electron-updater": "^6.3.4",
+    "jsonwebtoken": "^9.0.2",
+    "lodash.clonedeepwith": "^4.5.0",
     "patch-package": "^6.4.7"
   },
   "repository": {
@@ -16,21 +16,32 @@
     "url": "https://github.com/dbgate/dbgate.git"
   },
   "build": {
-    "artifactName": "${productName}-${version}-${os}_${arch}.${ext}",
+    "artifactName": "dbgate-${version}-${os}_${arch}.${ext}",
     "appId": "org.dbgate",
+    "productName": "DbGate",
+    "asarUnpack": "**/*.node",
     "mac": {
       "category": "database",
-      "icon": "icon512.png",
+      "icon": "icon512-mac.png",
+      "hardenedRuntime": true,
+      "entitlements": "entitlements.mac.plist",
+      "entitlementsInherit": "entitlements.mac.plist",
       "publish": [
-        "github"
+        {
+          "provider": "github",
+          "owner": "dbgate",
+          "repo": "dbgate"
+        }
       ],
       "target": {
         "target": "default",
         "arch": [
-          "arm64",
-          "x64"
+          "universal",
+          "x64",
+          "arm64"
         ]
-      }
+      },
+      "notarize": true
     },
     "linux": {
       "target": [
@@ -43,13 +54,18 @@
             "armv7l",
             "arm64"
           ]
-        }
+        },
+        "tar.gz"
       ],
       "icon": "icons/",
       "category": "Development",
       "synopsis": "Database manager for SQL Server, MySQL, PostgreSQL, MongoDB and SQLite",
       "publish": [
-        "github"
+        {
+          "provider": "github",
+          "owner": "dbgate",
+          "repo": "dbgate"
+        }
       ]
     },
     "appImage": {
@@ -67,7 +83,13 @@
     },
     "win": {
       "target": [
-        "nsis",
+        {
+          "target": "nsis",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
         {
           "target": "zip",
           "arch": [
@@ -78,35 +100,36 @@
       ],
       "icon": "icon.ico",
       "publish": [
-        "github"
-      ],
-      "rfc3161TimeStampServer": "http://sha256timestamp.ws.symantec.com/sha256/timestamp"
+        {
+          "provider": "github",
+          "owner": "dbgate",
+          "repo": "dbgate"
+        }
+      ]
     },
     "files": [
       "packages",
       "src",
-      "icon.png"
+      "icon.png",
+      "!node_modules/cpu-features/build/**"
     ]
   },
   "homepage": "./",
   "scripts": {
-    "start": "cross-env ELECTRON_START_URL=http://localhost:5000 electron .",
+    "start": "cross-env ELECTRON_START_URL=http://localhost:5001 DEVMODE=1 electron .",
     "start:local": "cross-env electron .",
     "dist": "electron-builder",
     "build": "cd ../packages/api && yarn build && cd ../web && yarn build && cd ../../app && yarn dist",
-    "build:mac": "cd ../packages/api && yarn build && cd ../web && yarn build && cd ../../app && node setMacPlatform x64 && yarn dist && node setMacPlatform arm64 && yarn dist",
     "build:local": "cd ../packages/api && yarn build && cd ../web && yarn build && cd ../../app && yarn predist",
-    "postinstall": "electron-builder install-app-deps && patch-package",
+    "postinstall": "yarn rebuild && patch-package",
+    "rebuild": "electron-builder install-app-deps",
     "predist": "copyfiles ../packages/api/dist/* packages && copyfiles \"../packages/web/public/*\" packages && copyfiles \"../packages/web/public/**/*\" packages && copyfiles --up 3 \"../plugins/dist/**/*\" packages/plugins"
   },
   "main": "src/electron.js",
   "devDependencies": {
     "copyfiles": "^2.2.0",
     "cross-env": "^6.0.3",
-    "electron": "11.2.3",
-    "electron-builder": "22.10.5"
-  },
-  "optionalDependencies": {
-    "msnodesqlv8": "^2.4.0"
+    "electron": "30.0.2",
+    "electron-builder": "25.1.8"
   }
 }

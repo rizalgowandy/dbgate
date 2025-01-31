@@ -68,7 +68,7 @@ export class SeriesSizes {
       // _.map(this.intKeys(_.keys(this.sizeOverridesByModelIndex)), (x) => this.modelToReal(x) - this.frozenCount),
       x => x >= 0
     );
-    this.scrollIndexes.sort();
+    this.scrollIndexes.sort((a, b) => a - b);
     let lastScrollIndex: number = -1;
     let lastEndPosition: number = 0;
     this.scrollIndexes.forEach(scrollIndex => {
@@ -99,9 +99,12 @@ export class SeriesSizes {
     }
 
     this.modelIndexes = _.range(0, this.count);
+    // console.log('SeriesSize:build:this.modelIndexes-before', this.modelIndexes);
+    // console.log('SeriesSize:build:this.hiddenAndFrozenModelIndexes', this.hiddenAndFrozenModelIndexes);
     if (this.hiddenAndFrozenModelIndexes) {
       this.modelIndexes = this.modelIndexes.filter(col => !this.hiddenAndFrozenModelIndexes.includes(col));
     }
+    // console.log('SeriesSize:build:this.modelIndexes-result', this.modelIndexes);
   }
 
   public getScrollIndexOnPosition(position: number): number {

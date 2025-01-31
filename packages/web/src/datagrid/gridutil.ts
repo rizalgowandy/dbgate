@@ -1,10 +1,13 @@
 import _ from 'lodash';
 import { SeriesSizes } from './SeriesSizes';
-import { CellAddress } from './selection';
-import { GridDisplay } from 'dbgate-datalib';
-import Grider from './Grider';
+import type { CellAddress } from './selection';
+import type { GridDisplay } from 'dbgate-datalib';
+import type Grider from './Grider';
+import { isJsonLikeLongString, safeJsonParse } from 'dbgate-tools';
 
 export function countColumnSizes(grider: Grider, columns, containerWidth, display: GridDisplay) {
+  // console.log('COUNT SIZES');
+
   const columnSizes = new SeriesSizes();
   if (!grider || !columns || !display) return columnSizes;
 
@@ -14,6 +17,7 @@ export function countColumnSizes(grider: Grider, columns, containerWidth, displa
   //return this.context.measureText(txt).width;
 
   // console.log('countColumnSizes', loadedRows.length, containerWidth);
+  // console.log('countColumnSizes:columns', columns);
 
   columnSizes.maxSize = (containerWidth * 2) / 3;
   columnSizes.count = columns.length;
@@ -68,6 +72,7 @@ export function countColumnSizes(grider: Grider, columns, containerWidth, displa
       let text = value;
       if (_.isArray(value)) text = `[${value.length} items]`;
       else if (value?.$oid) text = `ObjectId("${value.$oid}")`;
+      else if (isJsonLikeLongString(value) && safeJsonParse(value)) text = '(JSON)';
       const width = context.measureText(text).width + 8;
       // console.log('colName', colName, text, width);
       columnSizes.putSizeOverride(colIndex, width);
@@ -110,10 +115,12 @@ export function countVisibleRealColumns(columnSizes, firstVisibleColumnScrollInd
   ) {
     visibleRealColumnIndexes.push(colIndex + columnSizes.frozenCount);
   }
+  // console.log('countVisibleRealColumns:visibleRealColumnIndexes', visibleRealColumnIndexes);
 
   // real columns
   for (let colIndex of visibleRealColumnIndexes) {
     let modelColumnIndex = columnSizes.realToModel(colIndex);
+    // console.log('countVisibleRealColumns:modelColumnIndex', modelColumnIndex);
     modelIndexes[colIndex] = modelColumnIndex;
 
     let col = columns[modelColumnIndex];
@@ -125,6 +132,7 @@ export function countVisibleRealColumns(columnSizes, firstVisibleColumnScrollInd
       width,
     });
   }
+  // console.log('countVisibleRealColumns:realColumns', realColumns);
   return realColumns;
 }
 

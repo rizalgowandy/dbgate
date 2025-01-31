@@ -1,6 +1,6 @@
 import _ from 'lodash';
-import { GridConfig, GridCache, GridConfigColumns, createGridCache, GroupFunc } from './GridConfig';
-import {
+import { GridConfig, GridCache, GridConfigColumns, createGridCache, GroupFunc, createGridConfig } from './GridConfig';
+import type {
   ForeignKeyInfo,
   TableInfo,
   ColumnInfo,
@@ -10,12 +10,13 @@ import {
   CollectionInfo,
   SqlDialect,
   ViewInfo,
+  FilterBehaviour,
 } from 'dbgate-types';
-import { parseFilter, getFilterType } from 'dbgate-filterparser';
+import { parseFilter } from 'dbgate-filterparser';
 import { filterName } from 'dbgate-tools';
 import { ChangeSetFieldDefinition, ChangeSetRowDefinition } from './ChangeSet';
-import { Expression, Select, treeToSql, dumpSqlSelect, Condition } from 'dbgate-sqltree';
-import { isTypeLogical } from 'dbgate-tools';
+import { Expression, Select, treeToSql, dumpSqlSelect, Condition, CompoudCondition } from 'dbgate-sqltree';
+import { isTypeLogical, standardFilterBehaviours, detectSqlFilterBehaviour, stringFilterBehaviour } from 'dbgate-tools';
 
 export interface DisplayColumn {
   schemaName: string;
@@ -24,15 +25,22 @@ export interface DisplayColumn {
   headerText: string;
   uniqueName: string;
   uniquePath: string[];
-  notNull: boolean;
+  notNull?: boolean;
   autoIncrement?: boolean;
   isPrimaryKey?: boolean;
+
+  // NoSQL specific
+  isPartitionKey?: boolean;
+  isClusterKey?: boolean;
+  isUniqueKey?: boolean;
+
   foreignKey?: ForeignKeyInfo;
+  isForeignKeyUnique?: boolean;
   isExpandable?: boolean;
   isChecked?: boolean;
   hintColumnNames?: string[];
   dataType?: string;
-  filterType?: boolean;
+  filterBehaviour?: FilterBehaviour;
   isStructured?: boolean;
 }
 
@@ -69,6 +77,7 @@ export abstract class GridDisplay {
   }
   dialect: SqlDialect;
   columns: DisplayColumn[];
+  formColumns: DisplayColumn[] = [];
   baseTable?: TableInfo;
   baseView?: ViewInfo;
   baseCollection?: CollectionInfo;
@@ -82,6 +91,7 @@ export abstract class GridDisplay {
     return this.baseTable || this.baseView;
   }
   changeSetKeyFields: string[] = null;
+  editableStructure: TableInfo = null;
   sortable = false;
   groupable = false;
   filterable = false;
@@ -89,25 +99,32 @@ export abstract class GridDisplay {
   isLoadedCorrectly = true;
   supportsReload = false;
   isDynamicStructure = false;
+  filterBehaviourOverride = null;
 
   setColumnVisibility(uniquePath: string[], isVisible: boolean) {
     const uniqueName = uniquePath.join('.');
     if (uniquePath.length == 1) {
-      this.includeInColumnSet('hiddenColumns', uniqueName, !isVisible);
+      this.includeInColumnSet([
+        { field: 'hiddenColumns', uniqueName, isIncluded: !isVisible },
+        isVisible == false && this.isDynamicStructure && { field: 'addedColumns', uniqueName, isIncluded: false },
+      ]);
     } else {
-      this.includeInColumnSet('addedColumns', uniqueName, isVisible);
+      this.includeInColumnSet([{ field: 'addedColumns', uniqueName, isIncluded: isVisible }]);
       if (!this.isDynamicStructure) this.reload();
     }
   }
 
   addDynamicColumn(name: string) {
-    this.includeInColumnSet('addedColumns', name, true);
+    this.includeInColumnSet([
+      { field: 'addedColumns', uniqueName: name, isIncluded: true },
+      { field: 'hiddenColumns', uniqueName: name, isIncluded: false },
+    ]);
   }
 
-  focusColumn(uniqueName: string) {
+  focusColumns(uniqueNames: string[]) {
     this.setConfig(cfg => ({
       ...cfg,
-      focusedColumn: uniqueName,
+      focusedColumns: uniqueNames,
     }));
   }
 
@@ -115,8 +132,8 @@ export abstract class GridDisplay {
     return false;
   }
 
-  get focusedColumn() {
-    return this.config.focusedColumn;
+  get focusedColumns() {
+    return this.config.focusedColumns;
   }
 
   get engine() {
@@ -127,6 +144,10 @@ export abstract class GridDisplay {
     return this.getColumns(null).filter(col => col.isChecked || col.uniquePath.length == 1);
   }
 
+  findColumn(uniqueName: string) {
+    return this.getColumns(null).find(x => x.uniqueName == uniqueName);
+  }
+
   getFkTarget(column: DisplayColumn): TableInfo {
     return null;
   }
@@ -135,19 +156,30 @@ export abstract class GridDisplay {
     this.setCache(reloadDataCacheFunc);
   }
 
-  includeInColumnSet(field: keyof GridConfigColumns, uniqueName: string, isIncluded: boolean) {
-    // console.log('includeInColumnSet', field, uniqueName, isIncluded);
-    if (isIncluded) {
-      this.setConfig(cfg => ({
-        ...cfg,
-        [field]: [...(cfg[field] || []), uniqueName],
-      }));
-    } else {
-      this.setConfig(cfg => ({
-        ...cfg,
-        [field]: (cfg[field] || []).filter(x => x != uniqueName),
-      }));
-    }
+  includeInColumnSet(
+    modifications: ({ field: keyof GridConfigColumns; uniqueName: string; isIncluded: boolean } | null)[]
+  ) {
+    this.setConfig(cfg => {
+      let res = cfg;
+      for (const modification of modifications) {
+        if (!modification) {
+          continue;
+        }
+        const { field, uniqueName, isIncluded } = modification;
+        if (isIncluded) {
+          res = {
+            ...res,
+            [field]: _.uniq([...(cfg[field] || []), uniqueName]),
+          };
+        } else {
+          res = {
+            ...res,
+            [field]: _.uniq((cfg[field] || []).filter(x => x != uniqueName)),
+          };
+        }
+      }
+      return res;
+    });
   }
 
   showAllColumns() {
@@ -160,11 +192,12 @@ export abstract class GridDisplay {
   hideAllColumns() {
     this.setConfig(cfg => ({
       ...cfg,
-      hiddenColumns: this.columns.map(x => x.uniqueName),
+      hiddenColumns: this.columns.filter(x => x.uniquePath.length == 1).map(x => x.uniqueName),
     }));
   }
 
   get hiddenColumnIndexes() {
+    // console.log('GridDisplay.hiddenColumn', this.config.hiddenColumns);
     return (this.config.hiddenColumns || []).map(x => _.findIndex(this.allColumns, y => y.uniqueName == x));
   }
 
@@ -183,22 +216,55 @@ export abstract class GridDisplay {
       const column = displayedColumnInfo[uniqueName];
       if (!column) continue;
       try {
-        const condition = parseFilter(filter, getFilterType(column.dataType));
+        const condition = parseFilter(
+          filter,
+          this.driver?.getFilterBehaviour(column.dataType, standardFilterBehaviours) ??
+            detectSqlFilterBehaviour(column.dataType)
+        );
         if (condition) {
           conditions.push(
             _.cloneDeepWith(condition, (expr: Expression) => {
-              if (expr.exprType == 'placeholder')
-                return {
-                  exprType: 'column',
-                  columnName: column.columnName,
-                  source: { alias: column.sourceAlias },
-                };
+              if (expr.exprType == 'placeholder') {
+                return this.createColumnExpression(column, { alias: column.sourceAlias }, undefined, 'filter');
+              }
+              // return {
+              //   exprType: 'column',
+              //   columnName: column.columnName,
+              //   source: { alias: column.sourceAlias },
+              // };
             })
           );
         }
       } catch (err) {
         console.warn(err.message);
         continue;
+      }
+    }
+
+    if (this.baseTableOrView && this.config.multiColumnFilter) {
+      const orCondition: CompoudCondition = {
+        conditionType: 'or',
+        conditions: [],
+      };
+      for (const column of this.baseTableOrView.columns) {
+        try {
+          const condition = parseFilter(this.config.multiColumnFilter, detectSqlFilterBehaviour(column.dataType));
+          if (condition) {
+            orCondition.conditions.push(
+              _.cloneDeepWith(condition, (expr: Expression) => {
+                if (expr.exprType == 'placeholder') {
+                  return this.createColumnExpression(column, { alias: 'basetbl' }, undefined, 'filter');
+                }
+              })
+            );
+          }
+        } catch (err) {
+          // skip for this column
+          continue;
+        }
+      }
+      if (orCondition.conditions.length > 0) {
+        conditions.push(orCondition);
       }
     }
 
@@ -212,7 +278,7 @@ export abstract class GridDisplay {
 
   applySortOnSelect(select: Select, displayedColumnInfo: DisplayedColumnInfo) {
     if (this.config.sort?.length > 0) {
-      select.orderBy = this.config.sort
+      const orderByColumns = this.config.sort
         .map(col => ({ ...col, dispInfo: displayedColumnInfo[col.uniqueName] }))
         .map(col => ({ ...col, expr: select.columns.find(x => x.alias == col.uniqueName) }))
         .filter(col => col.dispInfo && col.expr)
@@ -220,6 +286,10 @@ export abstract class GridDisplay {
           ...col.expr,
           direction: col.order,
         }));
+
+      if (orderByColumns.length > 0) {
+        select.orderBy = orderByColumns;
+      }
     }
   }
 
@@ -306,7 +376,9 @@ export abstract class GridDisplay {
   }
 
   toggleExpandedColumn(uniqueName: string, value?: boolean) {
-    this.includeInColumnSet('expandedColumns', uniqueName, value == null ? !this.isExpandedColumn(uniqueName) : value);
+    this.includeInColumnSet([
+      { field: 'expandedColumns', uniqueName, isIncluded: value == null ? !this.isExpandedColumn(uniqueName) : value },
+    ]);
   }
 
   getFilter(uniqueName: string) {
@@ -320,6 +392,16 @@ export abstract class GridDisplay {
         ...cfg.filters,
         [uniqueName]: value,
       },
+      formViewRecordNumber: 0,
+    }));
+    this.reload();
+  }
+
+  setMutliColumnFilter(value) {
+    this.setConfig(cfg => ({
+      ...cfg,
+      multiColumnFilter: value,
+      formViewRecordNumber: 0,
     }));
     this.reload();
   }
@@ -342,6 +424,7 @@ export abstract class GridDisplay {
     this.setConfig(cfg => ({
       ...cfg,
       filters: _.omit(cfg.filters, [uniqueName]),
+      formFilterColumns: (cfg.formFilterColumns || []).filter(x => x != uniqueName),
     }));
     this.reload();
   }
@@ -361,6 +444,22 @@ export abstract class GridDisplay {
     this.setConfig(cfg => ({
       ...cfg,
       sort: [{ uniqueName, order }],
+    }));
+    this.reload();
+  }
+
+  addToSort(uniqueName, order) {
+    this.setConfig(cfg => ({
+      ...cfg,
+      sort: [...(cfg.sort || []), { uniqueName, order }],
+    }));
+    this.reload();
+  }
+
+  clearSort() {
+    this.setConfig(cfg => ({
+      ...cfg,
+      sort: [],
     }));
     this.reload();
   }
@@ -401,6 +500,15 @@ export abstract class GridDisplay {
     return this.config.sort.find(x => x.uniqueName == uniqueName)?.order;
   }
 
+  getSortOrderIndex(uniqueName) {
+    if (this.config.sort.length <= 1) return -1;
+    return _.findIndex(this.config.sort, x => x.uniqueName == uniqueName);
+  }
+
+  isSortDefined() {
+    return (this.config.sort || []).length > 0;
+  }
+
   get filterCount() {
     return _.compact(_.values(this.config.filters)).length;
   }
@@ -409,7 +517,13 @@ export abstract class GridDisplay {
     this.setConfig(cfg => ({
       ...cfg,
       filters: {},
+      multiColumnFilter: null,
     }));
+    this.reload();
+  }
+
+  resetConfig() {
+    this.setConfig(cfg => createGridConfig());
     this.reload();
   }
 
@@ -418,30 +532,39 @@ export abstract class GridDisplay {
     return _.pick(row, this.changeSetKeyFields);
   }
 
-  getChangeSetField(row, uniqueName, insertedRowIndex): ChangeSetFieldDefinition {
+  getChangeSetField(
+    row,
+    uniqueName,
+    insertedRowIndex,
+    existingRowIndex = null,
+    baseNameOmitable = false
+  ): ChangeSetFieldDefinition {
     const col = this.columns.find(x => x.uniqueName == uniqueName);
     if (!col) return null;
     const baseObj = this.baseTableOrSimilar;
-    if (!baseObj) return null;
-    if (baseObj.pureName != col.pureName || baseObj.schemaName != col.schemaName) {
-      return null;
+    if (!baseNameOmitable) {
+      if (!baseObj) return null;
+      if (baseObj.pureName != col.pureName || baseObj.schemaName != col.schemaName) {
+        return null;
+      }
     }
 
     return {
-      ...this.getChangeSetRow(row, insertedRowIndex),
+      ...this.getChangeSetRow(row, insertedRowIndex, existingRowIndex, baseNameOmitable),
       uniqueName: uniqueName,
       columnName: col.columnName,
     };
   }
 
-  getChangeSetRow(row, insertedRowIndex): ChangeSetRowDefinition {
+  getChangeSetRow(row, insertedRowIndex, existingRowIndex, baseNameOmitable = false): ChangeSetRowDefinition {
     const baseObj = this.baseTableOrSimilar;
-    if (!baseObj) return null;
+    if (!baseNameOmitable && !baseObj) return null;
     return {
-      pureName: baseObj.pureName,
-      schemaName: baseObj.schemaName,
+      pureName: baseObj?.pureName,
+      schemaName: baseObj?.schemaName,
       insertedRowIndex,
-      condition: insertedRowIndex == null ? this.getChangeSetCondition(row) : null,
+      existingRowIndex,
+      condition: insertedRowIndex == null && existingRowIndex == null ? this.getChangeSetCondition(row) : null,
     };
   }
 
@@ -451,25 +574,41 @@ export abstract class GridDisplay {
 
   processReferences(select: Select, displayedColumnInfo: DisplayedColumnInfo, options) {}
 
-  createSelectBase(name: NamedObjectInfo, columns: ColumnInfo[], options) {
+  createColumnExpression(col, source, alias?, purpose: 'view' | 'filter' = 'view') {
+    let expr = null;
+    if (this.dialect.createColumnViewExpression) {
+      expr = this.dialect.createColumnViewExpression(col.columnName, col.dataType, source, alias, purpose);
+      if (expr) {
+        return expr;
+      }
+    }
+    return {
+      exprType: 'column',
+      alias: alias || col.columnName,
+      source,
+      ...col,
+    };
+  }
+
+  createSelectBase(name: NamedObjectInfo, columns: ColumnInfo[], options, defaultOrderColumnName?: string) {
     if (!columns) return null;
-    const orderColumnName = columns[0].columnName;
+    const orderColumnName = defaultOrderColumnName ?? columns[0]?.columnName;
     const select: Select = {
       commandType: 'select',
-      from: { name, alias: 'basetbl' },
-      columns: columns.map(col => ({
-        exprType: 'column',
-        alias: col.columnName,
-        source: { alias: 'basetbl' },
-        ...col,
-      })),
-      orderBy: [
-        {
-          exprType: 'column',
-          columnName: orderColumnName,
-          direction: 'ASC',
-        },
-      ],
+      from: {
+        name: _.pick(name, ['schemaName', 'pureName']),
+        alias: 'basetbl',
+      },
+      columns: columns.map(col => this.createColumnExpression(col, { alias: 'basetbl' }, undefined, 'view')),
+      orderBy: this.driver?.requiresDefaultSortCriteria
+        ? [
+            {
+              exprType: 'column',
+              columnName: orderColumnName,
+              direction: 'ASC',
+            },
+          ]
+        : null,
     };
     const displayedColumnInfo = _.keyBy(
       this.columns.map(col => ({ ...col, sourceAlias: 'basetbl' })),
@@ -490,7 +629,7 @@ export abstract class GridDisplay {
       columns: [
         ...select.columns,
         {
-          alias: '_rowNumber',
+          alias: '_RowNumber',
           exprType: 'rowNumber',
           orderBy: select.orderBy
             ? select.orderBy.map(x =>
@@ -548,11 +687,12 @@ export abstract class GridDisplay {
     let select = this.createSelect();
     if (!select) return null;
     if (this.dialect.rangeSelect) select.range = { offset: offset, limit: count };
-    else if (this.dialect.rowNumberOverPaging && offset > 0)
+    else if (this.dialect.rowNumberOverPaging && (offset > 0 || !this.dialect.topRecords))
       select = this.getRowNumberOverSelect(select, offset, count);
     else if (this.dialect.limitSelect) select.topRecords = count;
-    const sql = treeToSql(this.driver, select, dumpSqlSelect);
-    return sql;
+    return select;
+    // const sql = treeToSql(this.driver, select, dumpSqlSelect);
+    // return sql;
   }
 
   getExportQuery(postprocessSelect = null) {
@@ -561,6 +701,27 @@ export abstract class GridDisplay {
     if (postprocessSelect) postprocessSelect(select);
     const sql = treeToSql(this.driver, select, dumpSqlSelect);
     return sql;
+  }
+
+  getExportQueryJson(postprocessSelect = null) {
+    const select = this.createSelect({ isExport: true });
+    if (!select) return null;
+    if (postprocessSelect) postprocessSelect(select);
+    return select;
+  }
+
+  getExportColumnMap() {
+    const changesDefined = this.config.hiddenColumns?.length > 0 || this.config.addedColumns?.length > 0;
+    if (this.isDynamicStructure && !changesDefined) {
+      return null;
+    }
+    return this.getColumns(null)
+      .filter(col => col.isChecked)
+      .map(col => ({
+        dst: col.uniqueName,
+        src: col.uniqueName,
+        ignore: !changesDefined,
+      }));
   }
 
   resizeColumn(uniqueName: string, computedSize: number, diff: number) {
@@ -607,26 +768,31 @@ export abstract class GridDisplay {
           alias: 'count',
         },
       ];
+      select.selectAll = false;
     }
-    const sql = treeToSql(this.driver, select, dumpSqlSelect);
-    return sql;
+    return select;
+    // const sql = treeToSql(this.driver, select, dumpSqlSelect);
+    // return sql;
   }
 
-  compileFilters(): Condition {
+  compileJslFilters(): Condition {
     const filters = this.config && this.config.filters;
     if (!filters) return null;
     const conditions = [];
     for (const name in filters) {
-      const column = this.columns.find(x => (x.columnName = name));
-      if (!column) continue;
-      const filterType = getFilterType(column.dataType);
+      const column = this.isDynamicStructure ? null : this.columns.find(x => x.columnName == name);
+      if (!this.isDynamicStructure && !column) continue;
+      const filterBehaviour =
+        this.filterBehaviourOverride ??
+        this.driver?.getFilterBehaviour(column.dataType, standardFilterBehaviours) ??
+        detectSqlFilterBehaviour(column.dataType);
       try {
-        const condition = parseFilter(filters[name], filterType);
+        const condition = parseFilter(filters[name], filterBehaviour);
         const replaced = _.cloneDeepWith(condition, (expr: Expression) => {
           if (expr.exprType == 'placeholder')
             return {
               exprType: 'column',
-              columnName: column.columnName,
+              columnName: this.isDynamicStructure ? name : column.columnName,
             };
         });
         conditions.push(replaced);
@@ -634,6 +800,17 @@ export abstract class GridDisplay {
         // filter parse error - ignore filter
       }
     }
+
+    if (this.config.multiColumnFilter) {
+      const placeholderCondition = parseFilter(this.config.multiColumnFilter, stringFilterBehaviour);
+      if (placeholderCondition) {
+        conditions.push({
+          conditionType: 'anyColumnPass',
+          placeholderCondition,
+        });
+      }
+    }
+
     if (conditions.length == 0) return null;
     return {
       conditionType: 'and',
@@ -641,22 +818,11 @@ export abstract class GridDisplay {
     };
   }
 
-  switchToFormView(rowData) {
-    if (!this.baseTable) return;
-    const { primaryKey } = this.baseTable;
-    if (!primaryKey) return;
-    const { columns } = primaryKey;
-
+  switchToFormView(rowIndex) {
     this.setConfig(cfg => ({
       ...cfg,
       isFormView: true,
-      formViewKey: rowData
-        ? _.pick(
-            rowData,
-            columns.map(x => x.columnName)
-          )
-        : null,
-      formViewKeyRequested: null,
+      formViewRecordNumber: rowIndex,
     }));
   }
 
@@ -665,6 +831,36 @@ export abstract class GridDisplay {
       ...cfg,
       isJsonView: true,
     }));
+  }
+
+  formViewNavigate(command, allRowCount) {
+    switch (command) {
+      case 'begin':
+        this.setConfig(cfg => ({
+          ...cfg,
+          formViewRecordNumber: 0,
+        }));
+        break;
+      case 'previous':
+        this.setConfig(cfg => ({
+          ...cfg,
+          formViewRecordNumber: Math.max((cfg.formViewRecordNumber || 0) - 1, 0),
+        }));
+        break;
+      case 'next':
+        this.setConfig(cfg => ({
+          ...cfg,
+          formViewRecordNumber: Math.max((cfg.formViewRecordNumber || 0) + 1, 0),
+        }));
+        break;
+      case 'end':
+        this.setConfig(cfg => ({
+          ...cfg,
+          formViewRecordNumber: Math.max(allRowCount - 1, 0),
+        }));
+        break;
+    }
+    this.reload();
   }
 }
 

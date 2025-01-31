@@ -11,6 +11,7 @@ import {
   UniqueInfo,
   SqlObjectInfo,
   NamedObjectInfo,
+  ColumnsConstraintInfo,
 } from '../../types';
 
 export class DatabaseInfoAlterProcessor {
@@ -59,6 +60,9 @@ export class DatabaseInfoAlterProcessor {
       case 'primaryKey':
         table.primaryKey = constraint as PrimaryKeyInfo;
         break;
+      case 'sortingKey':
+        table.sortingKey = constraint as ColumnsConstraintInfo;
+        break;
       case 'foreignKey':
         table.foreignKeys.push(constraint as ForeignKeyInfo);
         break;
@@ -86,6 +90,9 @@ export class DatabaseInfoAlterProcessor {
       case 'primaryKey':
         table.primaryKey = null;
         break;
+      case 'sortingKey':
+        table.sortingKey = null;
+        break;
       case 'foreignKey':
         table.foreignKeys = table.foreignKeys.filter(x => x.constraintName != constraint.constraintName);
         break;
@@ -105,6 +112,11 @@ export class DatabaseInfoAlterProcessor {
     this.db.tables.find(x => x.pureName == table.pureName && x.schemaName == table.schemaName).pureName = newName;
   }
 
+  renameSqlObject(obj: SqlObjectInfo, newName: string) {
+    this.db[obj.objectTypeField].find(x => x.pureName == obj.pureName && x.schemaName == obj.schemaName).pureName =
+      newName;
+  }
+
   renameColumn(column: ColumnInfo, newName: string) {
     const table = this.db.tables.find(x => x.pureName == column.pureName && x.schemaName == column.schemaName);
     table.columns.find(x => x.columnName == column.columnName).columnName = newName;
@@ -116,10 +128,22 @@ export class DatabaseInfoAlterProcessor {
     throw new Error('recreateTable not implemented for DatabaseInfoAlterProcessor');
   }
 
-  fillPreloadedRows(table: NamedObjectInfo, oldRows: any[], newRows: any[], key: string[], insertOnly: string[]) {
+  fillPreloadedRows(
+    table: NamedObjectInfo,
+    oldRows: any[],
+    newRows: any[],
+    key: string[],
+    insertOnly: string[],
+    autoIncrementColumn: string
+  ) {
     const tableInfo = this.db.tables.find(x => x.pureName == table.pureName && x.schemaName == table.schemaName);
     tableInfo.preloadedRows = newRows;
     tableInfo.preloadedRowsKey = key;
     tableInfo.preloadedRowsInsertOnly = insertOnly;
+  }
+
+  setTableOption(table: TableInfo, optionName: string, optionValue: string) {
+    const tableInfo = this.db.tables.find(x => x.pureName == table.pureName && x.schemaName == table.schemaName);
+    tableInfo[optionName] = optionValue;
   }
 }

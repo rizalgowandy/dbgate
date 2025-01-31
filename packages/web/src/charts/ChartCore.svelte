@@ -1,6 +1,7 @@
 <script lang="ts" context="module">
   import Chart from 'chart.js/auto';
   import 'chartjs-adapter-moment';
+  import zoomPlugin from 'chartjs-plugin-zoom';
 
   const getCurrentEditor = () => getActiveComponent('ChartCore');
 
@@ -15,16 +16,19 @@
     onClick: () => getCurrentEditor().exportChart(),
     testEnabled: () => getCurrentEditor() != null,
   });
+
+  Chart.register(zoomPlugin);
 </script>
 
 <script lang="ts">
   import { onMount, afterUpdate, onDestroy } from 'svelte';
+  import _ from 'lodash';
   import registerCommand from '../commands/registerCommand';
-  import axiosInstance from '../utility/axiosInstance';
+  import { apiCall } from '../utility/api';
 
   import contextMenu, { getContextMenu, registerMenu } from '../utility/contextMenu';
   import createActivator, { getActiveComponent } from '../utility/createActivator';
-  import { saveFileToDisk } from '../utility/exportElectronFile';
+  import { saveFileToDisk } from '../utility/exportFileTools';
 
   export let data;
   export let title;
@@ -41,8 +45,9 @@
   onMount(() => {
     chart = new Chart(domChart, {
       type,
-      data,
-      options,
+      data: data,
+      // options must be cloned, because chartjs modifies options object, without cloning fails passing options to electron invoke
+      options: _.cloneDeep(options), 
     });
   });
 
@@ -50,7 +55,7 @@
     if (!chart) return;
     chart.data = data;
     chart.type = type;
-    chart.options = options;
+    chart.options = _.cloneDeep(options);
     // chart.plugins = plugins;
     chart.update();
   });
@@ -61,7 +66,7 @@
 
   export async function exportChart() {
     saveFileToDisk(async filePath => {
-      await axiosInstance.post('files/export-chart', {
+      await apiCall('files/export-chart', {
         title,
         filePath,
         config: {

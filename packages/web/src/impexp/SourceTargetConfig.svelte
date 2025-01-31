@@ -1,6 +1,6 @@
 <script lang="ts">
   import _ from 'lodash';
-  import FormStyledButton from '../elements/FormStyledButton.svelte';
+  import FormStyledButton from '../buttons/FormStyledButton.svelte';
   import FormArchiveFilesSelect from '../forms/FormArchiveFilesSelect.svelte';
   import moment from 'moment';
 
@@ -14,13 +14,14 @@
   import { findFileFormat, getFileFormatDirections } from '../plugins/fileformats';
   import SqlEditor from '../query/SqlEditor.svelte';
   import { currentArchive, currentDatabase, extensions } from '../stores';
-  import { useArchiveFiles, useConnectionInfo, useDatabaseInfo } from '../utility/metadataLoaders';
+  import { useConnectionInfo } from '../utility/metadataLoaders';
   import FilesInput from './FilesInput.svelte';
   import FormConnectionSelect from './FormConnectionSelect.svelte';
   import FormDatabaseSelect from './FormDatabaseSelect.svelte';
   import FormSchemaSelect from './FormSchemaSelect.svelte';
   import FormTablesSelect from './FormTablesSelect.svelte';
   import { findEngineDriver } from 'dbgate-tools';
+  import AceEditor from '../query/AceEditor.svelte';
 
   export let direction;
   export let storageTypeField;
@@ -50,8 +51,6 @@
         ];
 
   $: storageType = $values[storageTypeField];
-  $: dbinfo = useDatabaseInfo({ conid: $values[connectionIdField], database: $values[databaseNameField] });
-  $: archiveFiles = useArchiveFiles({ folder: $values[archiveFolderField] });
   $: format = findFileFormat($extensions, storageType);
   $: connectionInfo = useConnectionInfo({ conid: $values[connectionIdField] });
   $: driver = findEngineDriver($connectionInfo, $extensions);
@@ -69,31 +68,34 @@
     </div>
   {/if}
 
-  {#if direction == 'target'}
-    <div class="buttons">
-      {#if $currentDatabase}
-        <FormStyledButton
-          value="Current DB"
-          on:click={() => {
-            values.update(x => ({
-              ...x,
-              [storageTypeField]: 'database',
-              [connectionIdField]: $currentDatabase?.connection?._id,
-              [databaseNameField]: $currentDatabase?.name,
-            }));
-          }}
-        />
-      {/if}
+  <div class="buttons">
+    {#if $currentDatabase}
       <FormStyledButton
-        value="Current archive"
+        value="Current DB"
         on:click={() => {
           values.update(x => ({
             ...x,
-            [storageTypeField]: 'archive',
-            [archiveFolderField]: $currentArchive,
+            [storageTypeField]: 'database',
+            [connectionIdField]: $currentDatabase?.connection?._id,
+            [databaseNameField]: $currentDatabase?.name,
           }));
         }}
       />
+    {/if}
+    <FormStyledButton
+      value="Current archive"
+      data-testid={direction == 'source'
+        ? 'SourceTargetConfig_buttonCurrentArchive_source'
+        : 'SourceTargetConfig_buttonCurrentArchive_target'}
+      on:click={() => {
+        values.update(x => ({
+          ...x,
+          [storageTypeField]: 'archive',
+          [archiveFolderField]: $currentArchive,
+        }));
+      }}
+    />
+    {#if direction == 'target'}
       <FormStyledButton
         value="New archive"
         on:click={() => {
@@ -104,8 +106,8 @@
           }));
         }}
       />
-    </div>
-  {/if}
+    {/if}
+  </div>
 
   <FormSelectField
     options={types.filter(x => x.directions.includes(direction))}
@@ -114,7 +116,7 @@
   />
 
   {#if storageType == 'database' || storageType == 'query'}
-    <FormConnectionSelect name={connectionIdField} label="Server" />
+    <FormConnectionSelect name={connectionIdField} label="Server" {direction} />
     <FormDatabaseSelect conidName={connectionIdField} name={databaseNameField} label="Database" />
   {/if}
   {#if storageType == 'database'}
@@ -137,12 +139,11 @@
   {#if storageType == 'query'}
     <div class="label">Query</div>
     <div class="sqlwrap">
-      <SqlEditor
-        value={$values.sourceSql}
-        on:input={e => setFieldValue('sourceSql', e.detail)}
-        {engine}
-        focusOnCreate
-      />
+      {#if $values.sourceQueryType == 'json'}
+        <AceEditor value={$values.sourceQuery} on:input={e => setFieldValue('sourceQuery', e.detail)} mode="json" />
+      {:else}
+        <SqlEditor value={$values.sourceQuery} on:input={e => setFieldValue('sourceQuery', e.detail)} {engine} />
+      {/if}
     </div>
   {/if}
 
@@ -170,12 +171,11 @@
   {/if}
 
   {#if driver?.importExportArgs}
-  <FormArgumentList
-    args={driver?.importExportArgs.filter(arg => !arg.direction || arg.direction == direction)}
-    namePrefix={`${direction}_${driver.engine}_`}
-  />
-{/if}
-
+    <FormArgumentList
+      args={driver?.importExportArgs.filter(arg => !arg.direction || arg.direction == direction)}
+      namePrefix={`${direction}_${driver.engine}_`}
+    />
+  {/if}
 </div>
 
 <style>
@@ -192,10 +192,12 @@
 
   .sqlwrap {
     position: relative;
+    z-index: 0;
     height: 100px;
     width: 20vw;
     margin-left: var(--dim-large-form-margin);
     margin-bottom: var(--dim-large-form-margin);
+    border: 1px solid var(--theme-border);
   }
 
   .label {

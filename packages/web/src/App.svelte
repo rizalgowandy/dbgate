@@ -7,20 +7,54 @@
 
   import PluginsProvider from './plugins/PluginsProvider.svelte';
   import Screen from './Screen.svelte';
-  import { loadingPluginStore } from './stores';
+  import { loadingPluginStore, subscribeApiDependendStores } from './stores';
   import { setAppLoaded } from './utility/appLoadManager';
-  import axiosInstance from './utility/axiosInstance';
   import ErrorHandler from './utility/ErrorHandler.svelte';
   import OpenTabsOnStartup from './utility/OpenTabsOnStartup.svelte';
+  // import { shouldWaitForElectronInitialize } from './utility/getElectron';
+  import { subscribeConnectionPingers } from './utility/connectionsPinger';
+  import { subscribePermissionCompiler } from './utility/hasPermission';
+  import { apiCall, installNewVolatileConnectionListener } from './utility/api';
+  import { getConfig, getSettings, getUsedApps } from './utility/metadataLoaders';
+  import AppTitleProvider from './utility/AppTitleProvider.svelte';
+  import getElectron from './utility/getElectron';
+  import AppStartInfo from './widgets/AppStartInfo.svelte';
+  import SettingsListener from './utility/SettingsListener.svelte';
+  import { handleAuthOnStartup } from './clientAuth';
+  import { initializeAppUpdates } from './utility/appUpdate';
+
+  export let isAdminPage = false;
 
   let loadedApi = false;
+  let loadedPlugins = false;
 
   async function loadApi() {
+    // if (shouldWaitForElectronInitialize()) {
+    //   setTimeout(loadApi, 100);
+    //   return;
+    // }
+
     try {
-      const settings = await axiosInstance.get('config/get-settings');
-      const connections = await axiosInstance.get('connections/list');
-      const config = await axiosInstance.get('config/get');
-      loadedApi = settings?.data && connections?.data && config?.data;
+      // console.log('************** LOADING API');
+
+      const config = await getConfig();
+      await handleAuthOnStartup(config);
+
+      const connections = await apiCall('connections/list');
+      const settings = await getSettings();
+      const apps = await getUsedApps();
+      const loadedApiValue = !!(settings && connections && config && apps);
+
+      if (loadedApiValue) {
+        subscribeApiDependendStores();
+        subscribeConnectionPingers();
+        subscribePermissionCompiler();
+        installNewVolatileConnectionListener();
+        initializeAppUpdates();
+      }
+
+      loadedApi = loadedApiValue;
+
       if (!loadedApi) {
         console.log('API not initialized correctly, trying again in 1s');
         setTimeout(loadApi, 1000);
@@ -41,28 +75,30 @@
   $: {
     if (loadedApi && $loadingPluginStore?.loaded) {
       setAppLoaded();
+      loadedPlugins = true;
+      getElectron()?.send('app-started');
     }
   }
-
 </script>
 
-<DataGridRowHeightMeter />
 <ErrorHandler />
-<CommandListener />
 
 {#if loadedApi}
+  <DataGridRowHeightMeter />
+  <CommandListener />
   <PluginsProvider />
-  {#if $loadingPluginStore?.loaded}
+  <AppTitleProvider />
+  {#if loadedPlugins}
     <OpenTabsOnStartup />
+    <SettingsListener />
     <Screen />
   {:else}
-    <LoadingInfo
+    <AppStartInfo
       message={$loadingPluginStore.loadingPackageName
         ? `Loading plugin ${$loadingPluginStore.loadingPackageName} ...`
         : 'Preparing plugins ...'}
-      wrapper
     />
   {/if}
 {:else}
-  <LoadingInfo message="Starting DbGate ..." wrapper />
+  <AppStartInfo message="Starting DbGate" />
 {/if}

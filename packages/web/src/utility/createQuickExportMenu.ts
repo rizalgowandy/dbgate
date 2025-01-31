@@ -1,19 +1,50 @@
-import { ExtensionsDirectory, QuickExportDefinition } from 'dbgate-types';
-import getElectron from './getElectron';
+import type { QuickExportDefinition } from 'dbgate-types';
+import { currentArchive, getCurrentArchive, getExtensions } from '../stores';
+import hasPermission from './hasPermission';
 
-export default function createQuickExportMenu(
-  extensions: ExtensionsDirectory,
-  handler: (fmt: QuickExportDefinition) => Function
-) {
-  const electron = getElectron();
-  if (!electron) {
-    return { _skip: true };
-  }
-  return {
-    text: 'Quick export',
-    submenu: extensions.quickExports.map(fmt => ({
+export function createQuickExportMenuItems(handler: (fmt: QuickExportDefinition) => Function, advancedExportMenuItem) {
+  const extensions = getExtensions();
+  return [
+    {
+      text: 'Export advanced...',
+      ...advancedExportMenuItem,
+    },
+    { divider: true },
+    ...extensions.quickExports.map(fmt => ({
       text: fmt.label,
       onClick: handler(fmt),
     })),
+    { divider: true },
+    {
+      text: 'Current archive',
+      onClick: handler({
+        extension: 'jsonl',
+        label: 'Current archive',
+        noFilenameDependency: true,
+        createWriter: (fileName, dataName) => ({
+          functionName: 'archiveWriter',
+          props: {
+            fileName: dataName,
+            folderName: getCurrentArchive(),
+          },
+        }),
+      }),
+    },
+  ];
+}
+
+export default function createQuickExportMenu(
+  handler: (fmt: QuickExportDefinition) => Function,
+  advancedExportMenuItem,
+  additionalFields = {}
+) {
+  if (!hasPermission('dbops/export')) {
+    return null;
+  }
+
+  return {
+    text: 'Export',
+    submenu: createQuickExportMenuItems(handler, advancedExportMenuItem),
+    ...additionalFields,
   };
 }

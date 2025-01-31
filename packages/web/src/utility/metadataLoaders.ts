@@ -1,20 +1,22 @@
-import axiosInstance from './axiosInstance';
 import _ from 'lodash';
-import { cacheGet, cacheSet, getCachedPromise } from './cache';
+import { loadCachedValue, subscribeCacheChange, unsubscribeCacheChange } from './cache';
 import stableStringify from 'json-stable-stringify';
-import { cacheClean } from './cache';
-import socket from './socket';
-import getAsArray from './getAsArray';
-import { DatabaseInfo } from 'dbgate-types';
 import { derived } from 'svelte/store';
 import { extendDatabaseInfo } from 'dbgate-tools';
 import { setLocalStorage } from '../utility/storageCache';
+import { apiCall, apiOff, apiOn } from './api';
 
-const databaseInfoLoader = ({ conid, database }) => ({
+const databaseInfoLoader = ({ conid, database, modelTransFile }) => ({
   url: 'database-connections/structure',
-  params: { conid, database },
-  reloadTrigger: `database-structure-changed-${conid}-${database}`,
+  params: { conid, database, modelTransFile },
+  reloadTrigger: { key: `database-structure-changed`, conid, database },
   transform: extendDatabaseInfo,
+});
+
+const schemaListLoader = ({ conid, database }) => ({
+  url: 'database-connections/schema-list',
+  params: { conid, database },
+  reloadTrigger: { key: `schema-list-changed`, conid, database },
 });
 
 // const tableInfoLoader = ({ conid, database, schemaName, pureName }) => ({
@@ -32,31 +34,31 @@ const databaseInfoLoader = ({ conid, database }) => ({
 const connectionInfoLoader = ({ conid }) => ({
   url: 'connections/get',
   params: { conid },
-  reloadTrigger: 'connection-list-changed',
+  reloadTrigger: { key: 'connection-list-changed' },
 });
 
 const configLoader = () => ({
   url: 'config/get',
   params: {},
-  reloadTrigger: 'config-changed',
+  reloadTrigger: { key: 'config-changed' },
 });
 
 const settingsLoader = () => ({
   url: 'config/get-settings',
   params: {},
-  reloadTrigger: 'settings-changed',
+  reloadTrigger: { key: 'settings-changed' },
 });
 
 const platformInfoLoader = () => ({
   url: 'config/platform-info',
   params: {},
-  reloadTrigger: 'platform-info-changed',
+  reloadTrigger: { key: 'platform-info-changed' },
 });
 
 const favoritesLoader = () => ({
   url: 'files/favorites',
   params: {},
-  reloadTrigger: 'files-changed-favorites',
+  reloadTrigger: { key: 'files-changed-favorites' },
 });
 
 // const sqlObjectListLoader = ({ conid, database }) => ({
@@ -68,181 +70,156 @@ const favoritesLoader = () => ({
 const databaseStatusLoader = ({ conid, database }) => ({
   url: 'database-connections/status',
   params: { conid, database },
-  reloadTrigger: `database-status-changed-${conid}-${database}`,
+  reloadTrigger: { key: `database-status-changed`, conid, database },
 });
 
 const databaseListLoader = ({ conid }) => ({
   url: 'server-connections/list-databases',
   params: { conid },
-  reloadTrigger: `database-list-changed-${conid}`,
+  reloadTrigger: { key: `database-list-changed`, conid },
   onLoaded: value => {
     if (value?.length > 0) setLocalStorage(`database_list_${conid}`, value);
   },
+  errorValue: [],
 });
+
+// const databaseKeysLoader = ({ conid, database, root }) => ({
+//   url: 'database-connections/load-keys',
+//   params: { conid, database, root },
+//   reloadTrigger: `database-keys-changed-${conid}-${database}`,
+// });
 
 const serverVersionLoader = ({ conid }) => ({
   url: 'server-connections/version',
   params: { conid },
-  reloadTrigger: `server-version-changed-${conid}`,
+  reloadTrigger: { key: `server-version-changed`, conid },
 });
 
 const databaseServerVersionLoader = ({ conid, database }) => ({
   url: 'database-connections/server-version',
   params: { conid, database },
-  reloadTrigger: `database-server-version-changed-${conid}-${database}`,
+  reloadTrigger: { key: `database-server-version-changed`, conid, database },
 });
 
 const archiveFoldersLoader = () => ({
   url: 'archive/folders',
   params: {},
-  reloadTrigger: `archive-folders-changed`,
+  reloadTrigger: { key: `archive-folders-changed` },
 });
 
 const archiveFilesLoader = ({ folder }) => ({
   url: 'archive/files',
   params: { folder },
-  reloadTrigger: `archive-files-changed-${folder}`,
+  reloadTrigger: { key: `archive-files-changed`, folder },
+});
+
+const appFoldersLoader = () => ({
+  url: 'apps/folders',
+  params: {},
+  reloadTrigger: { key: `app-folders-changed` },
+});
+
+const appFilesLoader = ({ folder }) => ({
+  url: 'apps/files',
+  params: { folder },
+  reloadTrigger: { key: `app-files-changed`, app: folder },
+});
+
+// const dbAppsLoader = ({ conid, database }) => ({
+//   url: 'apps/get-apps-for-db',
+//   params: { conid, database },
+//   reloadTrigger: `db-apps-changed-${conid}-${database}`,
+// });
+
+const usedAppsLoader = ({ conid, database }) => ({
+  url: 'apps/get-used-apps',
+  params: {},
+  reloadTrigger: { key: `used-apps-changed` },
 });
 
 const serverStatusLoader = () => ({
   url: 'server-connections/server-status',
   params: {},
-  reloadTrigger: `server-status-changed`,
+  reloadTrigger: { key: `server-status-changed` },
 });
 
 const connectionListLoader = () => ({
   url: 'connections/list',
   params: {},
-  reloadTrigger: `connection-list-changed`,
+  reloadTrigger: { key: `connection-list-changed` },
 });
 
 const installedPluginsLoader = () => ({
   url: 'plugins/installed',
   params: {},
-  reloadTrigger: `installed-plugins-changed`,
+  reloadTrigger: { key: `installed-plugins-changed` },
 });
 
 const filesLoader = ({ folder }) => ({
   url: 'files/list',
   params: { folder },
-  reloadTrigger: `files-changed-${folder}`,
+  reloadTrigger: { key: `files-changed`, folder },
 });
 const allFilesLoader = () => ({
   url: 'files/list-all',
   params: {},
-  reloadTrigger: `all-files-changed`,
+  reloadTrigger: { key: `all-files-changed` },
 });
 const authTypesLoader = ({ engine }) => ({
   url: 'plugins/auth-types',
   params: { engine },
-  reloadTrigger: `installed-plugins-changed`,
+  reloadTrigger: { key: `installed-plugins-changed` },
+  errorValue: null,
 });
 
 async function getCore(loader, args) {
-  const { url, params, reloadTrigger, transform, onLoaded } = loader(args);
+  const { url, params, reloadTrigger, transform, onLoaded, errorValue } = loader(args);
   const key = stableStringify({ url, ...params });
 
   async function doLoad() {
-    const resp = await axiosInstance.request({
-      method: 'get',
-      url,
-      params,
-    });
-    const res = (transform || (x => x))(resp.data);
+    const resp = await apiCall(url, params);
+    if (resp?.errorMessage && errorValue !== undefined) {
+      if (onLoaded) onLoaded(errorValue);
+      return errorValue;
+    }
+    const res = (transform || (x => x))(resp);
     if (onLoaded) onLoaded(res);
     return res;
   }
 
-  const fromCache = cacheGet(key);
-  if (fromCache) return fromCache;
-  const res = await getCachedPromise(key, doLoad);
-
-  cacheSet(key, res, reloadTrigger);
+  const res = await loadCachedValue(reloadTrigger, key, doLoad);
   return res;
 }
 
 function useCore(loader, args) {
   const { url, params, reloadTrigger, transform, onLoaded } = loader(args);
   const cacheKey = stableStringify({ url, ...params });
+  let openedCount = 0;
 
   return {
     subscribe: onChange => {
       async function handleReload() {
-        async function doLoad() {
-          const resp = await axiosInstance.request({
-            method: 'get',
-            params,
-            url,
-          });
-          const res = (transform || (x => x))(resp.data);
-          if (onLoaded) onLoaded(res);
-          return res;
-        }
-
-        if (cacheKey) {
-          const fromCache = cacheGet(cacheKey);
-          if (fromCache) {
-            onChange(fromCache);
-          } else {
-            try {
-              const res = await getCachedPromise(cacheKey, doLoad);
-              cacheSet(cacheKey, res, reloadTrigger);
-              onChange(res);
-            } catch (err) {
-              console.error('Error when using cached promise', err);
-              cacheClean(cacheKey);
-              const res = await doLoad();
-              cacheSet(cacheKey, res, reloadTrigger);
-              onChange(res);
-            }
-          }
-        } else {
-          const res = await doLoad();
+        const res = await getCore(loader, args);
+        if (openedCount > 0) {
           onChange(res);
         }
       }
-
-      if (reloadTrigger && !socket) {
-        console.error('Socket not available, reloadTrigger not planned');
-      }
+      openedCount += 1;
       handleReload();
-      if (reloadTrigger && socket) {
-        for (const item of getAsArray(reloadTrigger)) {
-          socket.on(item, handleReload);
-        }
+
+      if (reloadTrigger) {
+        subscribeCacheChange(reloadTrigger, cacheKey, handleReload);
         return () => {
-          for (const item of getAsArray(reloadTrigger)) {
-            socket.off(item, handleReload);
-          }
+          openedCount -= 1;
+          unsubscribeCacheChange(reloadTrigger, cacheKey, handleReload);
+        };
+      } else {
+        return () => {
+          openedCount -= 1;
         };
       }
     },
   };
-
-  // const useTrack = track => ({
-  //   subscribe: onChange => {
-  //     onChange('TRACK ' + track);
-  //     if (track) {
-  //       const handle = setInterval(() => onChange('TRACK ' + track + ';' + new Date()), 1000);
-  //       // console.log("ON", track);
-  //       const oldTrack = track;
-  //       return () => {
-  //         clearInterval(handle);
-  //         // console.log("OFF", oldTrack);
-  //       };
-  //     }
-  //   },
-  // });
-
-  // const res = useFetch({
-  //   url,
-  //   params,
-  //   reloadTrigger,
-  //   cacheKey,
-  //   transform,
-  // });
-
-  // return res;
 }
 
 /** @returns {Promise<import('dbgate-types').DatabaseInfo>} */
@@ -410,6 +387,34 @@ export function useArchiveFolders(args = {}) {
   return useCore(archiveFoldersLoader, args);
 }
 
+export function getAppFiles(args) {
+  return getCore(appFilesLoader, args);
+}
+export function useAppFiles(args) {
+  return useCore(appFilesLoader, args);
+}
+
+export function getAppFolders(args = {}) {
+  return getCore(appFoldersLoader, args);
+}
+export function useAppFolders(args = {}) {
+  return useCore(appFoldersLoader, args);
+}
+
+export function getUsedApps(args = {}) {
+  return getCore(usedAppsLoader, args);
+}
+export function useUsedApps(args = {}) {
+  return useCore(usedAppsLoader, args);
+}
+
+// export function getDbApps(args = {}) {
+//   return getCore(dbAppsLoader, args);
+// }
+// export function useDbApps(args = {}) {
+//   return useCore(dbAppsLoader, args);
+// }
+
 export function getInstalledPlugins(args = {}) {
   return getCore(installedPluginsLoader, args) || [];
 }
@@ -443,4 +448,17 @@ export function getAuthTypes(args) {
 }
 export function useAuthTypes(args) {
   return useCore(authTypesLoader, args);
+}
+
+// export function getDatabaseKeys(args) {
+//   return getCore(databaseKeysLoader, args);
+// }
+// export function useDatabaseKeys(args) {
+//   return useCore(databaseKeysLoader, args);
+// }
+export function getSchemaList(args) {
+  return getCore(schemaListLoader, args);
+}
+export function useSchemaList(args) {
+  return useCore(schemaListLoader, args);
 }

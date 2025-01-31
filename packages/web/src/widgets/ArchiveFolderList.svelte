@@ -4,14 +4,14 @@
   import AppObjectList from '../appobj/AppObjectList.svelte';
   import * as archiveFolderAppObject from '../appobj/ArchiveFolderAppObject.svelte';
   import runCommand from '../commands/runCommand';
-  import CloseSearchButton from '../elements/CloseSearchButton.svelte';
+  import CloseSearchButton from '../buttons/CloseSearchButton.svelte';
 
-  import InlineButton from '../elements/InlineButton.svelte';
+  import InlineButton from '../buttons/InlineButton.svelte';
 
   import SearchBoxWrapper from '../elements/SearchBoxWrapper.svelte';
   import SearchInput from '../elements/SearchInput.svelte';
   import FontIcon from '../icons/FontIcon.svelte';
-  import axiosInstance from '../utility/axiosInstance';
+  import { apiCall } from '../utility/api';
   import { useArchiveFolders } from '../utility/metadataLoaders';
   import WidgetsInnerContainer from './WidgetsInnerContainer.svelte';
 
@@ -20,7 +20,7 @@
   $: folders = useArchiveFolders();
 
   const handleRefreshFolders = () => {
-    axiosInstance.post('archive/refresh-folders', {});
+    apiCall('archive/refresh-folders');
   };
 </script>
 

@@ -2,11 +2,12 @@ import { extensions } from '../stores';
 import { get } from 'svelte/store';
 import { canOpenByElectron, openElectronFileCore } from './openElectronFile';
 import getElectron from './getElectron';
-import resolveApi from './resolveApi';
+import resolveApi, { resolveApiHeaders } from './resolveApi';
 import { findFileFormat } from '../plugins/fileformats';
 import { showModal } from '../modals/modalTools';
-import ImportExportModal from '../modals/ImportExportModal.svelte';
 import ErrorMessageModal from '../modals/ErrorMessageModal.svelte';
+import openNewTab from './openNewTab';
+import { openImportExportTab } from './importExportTools';
 
 let uploadListener;
 
@@ -45,6 +46,7 @@ export default function uploadFiles(files) {
     const fetchOptions = {
       method: 'POST',
       body: formData,
+      headers: resolveApiHeaders(),
     };
 
     const apiBase = resolveApi();
@@ -53,8 +55,21 @@ export default function uploadFiles(files) {
 
     fileData.shortName = file.name;
 
+    if (file.name.endsWith('.jsonl') || file.name.endsWith('.ndjson')) {
+      openNewTab({
+        title: fileData.shortName,
+        icon: 'img archive',
+        tabComponent: 'ArchiveFileTab',
+        props: {
+          jslid: `file://${fileData.filePath}`,
+        },
+      });
+      return;
+    }
+
     for (const format of ext.fileFormats) {
       if (file.name.endsWith('.' + format.extension)) {
+        // || format.extensions?.find(ext => file.name.endsWith('.' + ext))
         fileData.shortName = file.name.slice(0, -format.extension.length - 1);
         fileData.storageType = format.storageType;
       }
@@ -64,13 +79,23 @@ export default function uploadFiles(files) {
       uploadListener(fileData);
     } else {
       if (findFileFormat(ext, fileData.storageType)) {
-        showModal(ImportExportModal, {
-          uploadedFile: fileData,
-          importToCurrentTarget: true,
-          initialValues: {
+        openImportExportTab(
+          {
             sourceStorageType: fileData.storageType,
           },
-        });
+          {
+            uploadedFile: fileData,
+            importToCurrentTarget: true,
+          }
+        );
+
+        // showModal(ImportExportModal, {
+        //   uploadedFile: fileData,
+        //   importToCurrentTarget: true,
+        //   initialValues: {
+        //     sourceStorageType: fileData.storageType,
+        //   },
+        // });
       }
     }
 

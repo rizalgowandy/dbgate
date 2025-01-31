@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte';
 
-  import FormStyledButton from '../elements/FormStyledButton.svelte';
+  import FormStyledButton from '../buttons/FormStyledButton.svelte';
   import FormProvider from '../forms/FormProvider.svelte';
   import FormSubmit from '../forms/FormSubmit.svelte';
   import AceEditor from '../query/AceEditor.svelte';
@@ -44,6 +44,7 @@
     <div slot="footer">
       <FormStyledButton
         value="Save"
+        data-testid="EditJsonModal_saveButton"
         on:click={() => {
           try {
             const parsed = JSON.parse(value);
@@ -56,7 +57,12 @@
           }
         }}
       />
-      <FormStyledButton type="button" value="Close" on:click={closeCurrentModal} />
+      <FormStyledButton
+        type="button"
+        value="Close"
+        on:click={closeCurrentModal}
+        data-testid="EditJsonModal_closeButton"
+      />
     </div>
   </ModalBase>
 </FormProvider>

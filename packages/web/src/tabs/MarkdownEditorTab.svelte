@@ -20,7 +20,7 @@
     icon: 'icon run',
     toolbar: true,
     isRelatedToTab: true,
-    keyText: 'F5 | Ctrl+Enter',
+    keyText: 'F5 | CtrlOrCommand+Enter',
     testEnabled: () => getCurrentEditor() != null,
     onClick: () => getCurrentEditor().preview(),
   });
@@ -41,13 +41,13 @@
 
   export let tabid;
 
-  const tabVisible: any = getContext('tabVisible');
+  const tabFocused: any = getContext('tabFocused');
 
   export const activator = createActivator('MarkdownEditorTab', false);
 
   let domEditor;
 
-  $: if ($tabVisible && domEditor) {
+  $: if ($tabFocused && domEditor) {
     domEditor?.getEditor()?.focus();
   }
 

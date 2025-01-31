@@ -1,5 +1,5 @@
 import { getCommands, visibleCommandPalette } from '../stores';
-import { GlobalCommand } from './registerCommand';
+import type { GlobalCommand } from './registerCommand';
 
 export default function runCommand(id) {
   const commandsValue = getCommands();
@@ -18,8 +18,6 @@ export default function runCommand(id) {
   }
 }
 
-window['dbgate_runCommand'] = runCommand;
-
 export function runGroupCommand(group) {
   const commandsValue = getCommands();
   const values = Object.values(commandsValue) as GlobalCommand[];
@@ -32,3 +30,4 @@ export function findCommand(id) {
   const command = commandsValue[id];
   return command;
 }
+

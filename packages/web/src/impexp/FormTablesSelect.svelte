@@ -1,12 +1,11 @@
 <script lang="ts">
   import _ from 'lodash';
 
-  import FormStyledButton from '../elements/FormStyledButton.svelte';
+  import FormStyledButton from '../buttons/FormStyledButton.svelte';
 
   import { getFormContext } from '../forms/FormProviderCore.svelte';
   import FormSelectField from '../forms/FormSelectField.svelte';
-import { getObjectTypeFieldLabel } from '../utility/common';
-  import { useDatabaseInfo, useDatabaseList } from '../utility/metadataLoaders';
+  import { useConnectionInfo, useDatabaseInfo } from '../utility/metadataLoaders';
 
   export let conidName;
   export let databaseName;
@@ -14,7 +13,12 @@ import { getObjectTypeFieldLabel } from '../utility/common';
   export let name;
 
   const { values, setFieldValue } = getFormContext();
-  $: dbinfo = useDatabaseInfo({ conid: $values[conidName], database: $values[databaseName] });
+
+  $: coninfo = useConnectionInfo({ conid: $values[conidName] });
+  $: dbinfo = useDatabaseInfo({
+    conid: $values[conidName],
+    database: $coninfo?.useSeparateSchemas ? `${$values[databaseName]}::${$values[schemaName]}` : $values[databaseName],
+  });
 
   $: tablesOptions = _.compact([
     ...($dbinfo?.tables || []),
@@ -27,7 +31,6 @@ import { getObjectTypeFieldLabel } from '../utility/common';
       value: x.pureName,
       label: x.pureName,
     }));
-
 </script>
 
 <div class="wrapper">
@@ -39,6 +42,7 @@ import { getObjectTypeFieldLabel } from '../utility/common';
         <FormStyledButton
           type="button"
           value={`All ${field}`}
+          data-testid={`FormTablesSelect_buttonAll_${field}`}
           on:click={() =>
             setFieldValue(
               name,
@@ -56,5 +60,4 @@ import { getObjectTypeFieldLabel } from '../utility/common';
   .wrapper {
     margin: var(--dim-large-form-margin);
   }
-
 </style>

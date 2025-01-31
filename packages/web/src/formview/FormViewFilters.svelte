@@ -1,13 +1,17 @@
 <script lang="ts">
   import _ from 'lodash';
+  import InlineButton from '../buttons/InlineButton.svelte';
+  import DataFilterControl from '../datagrid/DataFilterControl.svelte';
 
   import ManagerInnerContainer from '../elements/ManagerInnerContainer.svelte';
+  import FontIcon from '../icons/FontIcon.svelte';
   import keycodes from '../utility/keycodes';
   import FormViewFilterColumn from './FormViewFilterColumn.svelte';
-  import PrimaryKeyFilterEditor from './PrimaryKeyFilterEditor.svelte';
+  import { stringFilterBehaviour } from 'dbgate-tools';
+  // import PrimaryKeyFilterEditor from './PrimaryKeyFilterEditor.svelte';
 
   export let managerSize;
-  export let formDisplay;
+  export let display;
   export let setConfig;
 
   export let driver;
@@ -16,54 +20,88 @@
   export let schemaName;
   export let pureName;
 
-  $: baseTable = formDisplay?.baseTable;
-  $: formFilterColumns = formDisplay?.config?.formFilterColumns;
-  $: filters = formDisplay?.config?.filters;
+  export let isDynamicStructure;
+  export let isFormView;
 
-  $: allFilterNames = _.union(_.keys(filters || {}), formFilterColumns || []);
+  export let hasMultiColumnFilter;
+
+  $: baseTable = display?.baseTable;
+  $: formFilterColumns = display?.config?.formFilterColumns;
+  $: filters = display?.config?.filters;
+  $: multiColumnFilter = display?.config?.multiColumnFilter;
+
+  $: allFilterNames = isFormView ? _.union(_.keys(filters || {}), formFilterColumns || []) : _.keys(filters);
 </script>
 
-<div class="m-1">
-  <div>Column filter</div>
-  <div class="flex">
-    <input
-      type="text"
-      value={formDisplay?.config?.formColumnFilterText || ''}
-      on:keydown={e => {
-        if (e.keyCode == keycodes.escape) {
+{#if isFormView}
+  <div class="m-1">
+    <div>Column name filter</div>
+    <div class="flex">
+      <input
+        type="text"
+        value={display?.config?.formColumnFilterText || ''}
+        on:keydown={e => {
+          if (e.keyCode == keycodes.escape) {
+            setConfig(x => ({
+              ...x,
+              formColumnFilterText: '',
+            }));
+          }
+        }}
+        on:input={e =>
           setConfig(x => ({
             ...x,
-            formColumnFilterText: '',
-          }));
-        }
-      }}
-      on:input={e =>
-        setConfig(x => ({
-          ...x,
-          // @ts-ignore
-          formColumnFilterText: e.target.value,
-        }))}
+            // @ts-ignore
+            formColumnFilterText: e.target.value,
+          }))}
+      />
+    </div>
+  </div>
+{/if}
+
+{#if hasMultiColumnFilter}
+  <div class="m-1">
+    <div class="space-between">
+      <span>Multi column filter</span>
+      {#if multiColumnFilter}
+        <InlineButton
+          square
+          narrow
+          on:click={() => {
+            display.setMutliColumnFilter(null);
+          }}
+        >
+          <FontIcon icon="icon close" />
+        </InlineButton>
+      {/if}
+    </div>
+
+    <DataFilterControl
+      filterBehaviour={stringFilterBehaviour}
+      filter={multiColumnFilter}
+      setFilter={value => display.setMutliColumnFilter(value)}
+      {driver}
+      {conid}
+      {database}
+      {schemaName}
+      {pureName}
     />
   </div>
-</div>
-
-{#if baseTable?.primaryKey}
-  <ManagerInnerContainer width={managerSize}>
-    {#each baseTable.primaryKey.columns as col}
-      <PrimaryKeyFilterEditor {baseTable} column={col} {formDisplay} />
-    {/each}
-
-    {#each allFilterNames as uniqueName}
-      <FormViewFilterColumn
-        column={formDisplay.columns.find(x => x.uniqueName == uniqueName)}
-        {formDisplay}
-        {filters}
-        {driver}
-        {conid}
-        {database}
-        {schemaName}
-        {pureName}
-      />
-    {/each}
-  </ManagerInnerContainer>
 {/if}
+
+<ManagerInnerContainer width={managerSize}>
+  {#each allFilterNames as uniqueName}
+    <FormViewFilterColumn
+      {isDynamicStructure}
+      {isFormView}
+      {uniqueName}
+      {display}
+      {filters}
+      {driver}
+      {conid}
+      {database}
+      {schemaName}
+      {pureName}
+    />
+  {/each}
+</ManagerInnerContainer>

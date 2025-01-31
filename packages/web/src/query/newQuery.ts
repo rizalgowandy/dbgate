@@ -1,7 +1,6 @@
 import _ from 'lodash';
-import { get } from 'svelte/store';
-import { currentDatabase } from '../stores';
-import getConnectionLabel from '../utility/getConnectionLabel';
+import { getCurrentDatabase } from '../stores';
+import { getConnectionLabel } from 'dbgate-tools';
 import openNewTab from '../utility/openNewTab';
 
 export default function newQuery({
@@ -9,11 +8,12 @@ export default function newQuery({
   icon = 'img sql-file',
   title = undefined,
   initialData = undefined,
+  multiTabIndex = undefined,
   ...props
 } = {}) {
-  const $currentDatabase = get(currentDatabase);
-  const connection = _.get($currentDatabase, 'connection') || {};
-  const database = _.get($currentDatabase, 'name');
+  const currentDb = getCurrentDatabase();
+  const connection = currentDb?.connection || {};
+  const database = currentDb?.name;
 
   const tooltip = `${getConnectionLabel(connection)}\n${database}`;
 
@@ -23,6 +23,8 @@ export default function newQuery({
       icon,
       tooltip,
       tabComponent,
+      multiTabIndex,
+      focused: true,
       props: {
         ...props,
         conid: connection._id,
@@ -35,4 +37,12 @@ export default function newQuery({
 
 export function newQueryDesign() {
   return newQuery({ tabComponent: 'QueryDesignTab', icon: 'img query-design' });
+}
+
+export function newDiagram() {
+  return newQuery({ tabComponent: 'DiagramTab', icon: 'img diagram', title: 'Diagram #' });
+}
+
+export function newPerspective() {
+  return newQuery({ tabComponent: 'PerspectiveTab', icon: 'img perspective', title: 'Perspective #' });
 }

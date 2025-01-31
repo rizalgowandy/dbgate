@@ -1,11 +1,27 @@
 <script lang="ts">
-  import { update } from 'lodash';
+  import { onMount } from 'svelte';
   import FontIcon from '../icons/FontIcon.svelte';
-  import { currentDropDownMenu, selectedWidget, visibleCommandPalette, visibleToolbar } from '../stores';
+  import {
+    currentDropDownMenu,
+    selectedWidget,
+    visibleSelectedWidget,
+    visibleWidgetSideBar,
+    visibleHamburgerMenuWidget,
+    lockedDatabaseMode,
+    getCurrentConfig,
+  } from '../stores';
+  import mainMenuDefinition from '../../../../app/src/mainMenuDefinition';
+  import hasPermission from '../utility/hasPermission';
 
   let domSettings;
+  let domMainMenu;
 
   const widgets = [
+    getCurrentConfig().storageDatabase && {
+      icon: 'icon admin',
+      name: 'admin',
+      title: 'Administration',
+    },
     {
       icon: 'icon database',
       name: 'database',
@@ -40,6 +56,11 @@
       name: 'cell-data',
       title: 'Selected cell data detail view',
     },
+    {
+      icon: 'icon app',
+      name: 'app',
+      title: 'Application layers',
+    },
     // {
     //   icon: 'icon settings',
     //   name: 'settings',
@@ -51,34 +72,63 @@
   ];
 
   function handleChangeWidget(name) {
-    $selectedWidget = name == $selectedWidget ? null : name;
+    if ($visibleSelectedWidget == name) {
+      $visibleWidgetSideBar = false;
+    } else {
+      $selectedWidget = name;
+      $visibleWidgetSideBar = true;
+    }
   }
   //const handleChangeWidget= e => (selectedWidget.set(item.name))
 
   function handleSettingsMenu() {
     const rect = domSettings.getBoundingClientRect();
     const left = rect.right;
+    const top = rect.bottom;
+    const items = [{ command: 'settings.show' }, { command: 'theme.changeTheme' }, { command: 'settings.commands' }];
+    currentDropDownMenu.set({ left, top, items });
+  }
+
+  function handleMainMenu() {
+    const rect = domMainMenu.getBoundingClientRect();
+    const left = rect.right;
     const top = rect.top;
-    const items = [{ command: 'settings.commands' }, { command: 'theme.changeTheme' }, { command: 'settings.show' }];
+    const items = mainMenuDefinition({ editMenu: false });
     currentDropDownMenu.set({ left, top, items });
   }
 </script>
 
 <div class="main">
-  {#if !$visibleToolbar}
-    <div class="wrapper mb-3" on:click={() => ($visibleCommandPalette = 'menu')}>
+  {#if $visibleHamburgerMenuWidget}
+    <div class="wrapper mb-3" on:click={handleMainMenu} bind:this={domMainMenu} data-testid="WidgetIconPanel_menu">
       <FontIcon icon="icon menu" />
     </div>
   {/if}
-  {#each widgets as item}
-    <div class="wrapper" class:selected={item.name == $selectedWidget} on:click={() => handleChangeWidget(item.name)}>
+  {#each widgets.filter(x => x && hasPermission(`widgets/${x.name}`)) as item}
+    <div
+      class="wrapper"
+      class:selected={item.name == $visibleSelectedWidget}
+      data-testid={`WidgetIconPanel_${item.name}`}
+      on:click={() => handleChangeWidget(item.name)}
+    >
       <FontIcon icon={item.icon} title={item.title} />
     </div>
   {/each}
 
   <div class="flex1">&nbsp;</div>
 
-  <div class="wrapper" on:click={handleSettingsMenu} bind:this={domSettings}>
+  <div
+    class="wrapper"
+    title={`Toggle whether tabs from all databases are visible. Currently - ${$lockedDatabaseMode ? 'NO' : 'YES'}`}
+    on:click={() => {
+      $lockedDatabaseMode = !$lockedDatabaseMode;
+    }}
+    data-testid="WidgetIconPanel_lockDb"
+  >
+    <FontIcon icon={$lockedDatabaseMode ? 'icon locked-database-mode' : 'icon unlocked-database-mode'} />
+  </div>
+
+  <div class="wrapper" on:click={handleSettingsMenu} bind:this={domSettings} data-testid="WidgetIconPanel_settings">
     <FontIcon icon="icon settings" />
   </div>
 </div>

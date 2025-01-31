@@ -1,5 +1,5 @@
 <script lang="ts">
-  import FormStyledButton from '../elements/FormStyledButton.svelte';
+  import FormStyledButton from '../buttons/FormStyledButton.svelte';
   import { useConfig } from '../utility/metadataLoaders';
   import moment from 'moment';
 
@@ -8,8 +8,8 @@
   import Link from '../elements/Link.svelte';
 
   const config = useConfig();
-  $: version = $config.version;
-  $: buildTime = $config.buildTime;
+  $: version = $config?.version;
+  $: buildTime = $config?.buildTime;
 </script>
 
 <ModalBase {...$$restProps}>

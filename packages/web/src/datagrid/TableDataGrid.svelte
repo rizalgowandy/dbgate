@@ -3,11 +3,11 @@
     createGridCache,
     createGridConfig,
     runMacroOnChangeSet,
-    TableFormViewDisplay,
+    // TableFormViewDisplay,
     TableGridDisplay,
   } from 'dbgate-datalib';
   import { getFilterValueExpression } from 'dbgate-filterparser';
-  import { findEngineDriver } from 'dbgate-tools';
+  import { extendDatabaseInfoFromApps, findEngineDriver } from 'dbgate-tools';
   import _ from 'lodash';
   import { writable } from 'svelte/store';
   import VerticalSplitter from '../elements/VerticalSplitter.svelte';
@@ -16,9 +16,11 @@
 
   import {
     useConnectionInfo,
+    useConnectionList,
     useDatabaseInfo,
     useDatabaseServerVersion,
     useServerVersion,
+    useUsedApps,
   } from '../utility/metadataLoaders';
 
   import DataGrid from './DataGrid.svelte';
@@ -43,17 +45,20 @@
   export let setCache;
   export let multipleGridsOnTab = false;
 
+  export let isRawMode = false;
+
   $: connection = useConnectionInfo({ conid });
   $: dbinfo = useDatabaseInfo({ conid, database });
   $: serverVersion = useDatabaseServerVersion({ conid, database });
+  $: apps = useUsedApps();
+  $: extendedDbInfo = extendDatabaseInfoFromApps($dbinfo, $apps);
+  $: connections = useConnectionList();
 
   // $: console.log('serverVersion', $serverVersion);
 
   let myLoadedTime = 0;
 
   const childCache = writable(createGridCache());
-
-  // $: console.log('display', display);
 
   $: display =
     connection && $serverVersion
@@ -64,28 +69,31 @@
           setConfig,
           cache,
           setCache,
-          $dbinfo,
+          extendedDbInfo,
           { showHintColumns: getBoolSettingsValue('dataGrid.showHintColumns', true) },
           $serverVersion,
-          table => getDictionaryDescription(table, conid, database)
+          table => getDictionaryDescription(table, conid, database, $apps, $connections),
+          $connection?.isReadOnly,
+          isRawMode
         )
       : null;
 
-  $: formDisplay =
-    connection && $serverVersion
-      ? new TableFormViewDisplay(
-          { schemaName, pureName },
-          findEngineDriver($connection, $extensions),
-          config,
-          setConfig,
-          cache,
-          setCache,
-          $dbinfo,
-          { showHintColumns: getBoolSettingsValue('dataGrid.showHintColumns', true) },
-          $serverVersion,
-          table => getDictionaryDescription(table, conid, database)
-        )
-      : null;
+  // $: formDisplay =
+  //   connection && $serverVersion
+  //     ? new TableFormViewDisplay(
+  //         { schemaName, pureName },
+  //         findEngineDriver($connection, $extensions),
+  //         config,
+  //         setConfig,
+  //         cache,
+  //         setCache,
+  //         extendedDbInfo,
+  //         { showHintColumns: getBoolSettingsValue('dataGrid.showHintColumns', true) },
+  //         $serverVersion,
+  //         table => getDictionaryDescription(table, conid, database, $apps, $connections),
+  //         $connection?.isReadOnly
+  //       )
+  //     : null;
 
   const setChildConfig = (value, reference = undefined) => {
     if (_.isFunction(value)) {
@@ -135,7 +143,7 @@
   };
 
   function handleRunMacro(macro, params, cells) {
-    const newChangeSet = runMacroOnChangeSet(macro, params, cells, changeSetState?.value, display);
+    const newChangeSet = runMacroOnChangeSet(macro, params, cells, changeSetState?.value, display, false);
     if (newChangeSet) {
       dispatchChangeSet({ type: 'set', value: newChangeSet });
     }
@@ -152,13 +160,14 @@
       gridCoreComponent={SqlDataGridCore}
       formViewComponent={SqlFormView}
       {display}
-      {formDisplay}
       showReferences
-      showMacros
+      showMacros={!$connection?.isReadOnly}
+      hasMultiColumnFilter
       onRunMacro={handleRunMacro}
       macroCondition={macro => macro.type == 'transformValue'}
       onReferenceSourceChanged={reference ? handleReferenceSourceChanged : null}
       multipleGridsOnTab={multipleGridsOnTab || !!reference}
+      allowDefineVirtualReferences
       onReferenceClick={value => {
         if (value && value.referenceId && reference && reference.referenceId == value.referenceId) {
           // reference not changed

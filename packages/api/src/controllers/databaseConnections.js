@@ -1,4 +1,3 @@
-const uuidv1 = require('uuid/v1');
 const connections = require('./connections');
 const archive = require('./archive');
 const socket = require('../utility/socket');
@@ -12,6 +11,9 @@ const {
   matchPairedObjects,
   extendDatabaseInfo,
   modelCompareDbDiffOptions,
+  getLogger,
+  extractErrorLogData,
+  filterStructureBySchema,
 } = require('dbgate-tools');
 const { html, parse } = require('diff2html');
 const { handleProcessCommunication } = require('../utility/processComm');
@@ -25,6 +27,15 @@ const requireEngineDriver = require('../utility/requireEngineDriver');
 const generateDeploySql = require('../shell/generateDeploySql');
 const { createTwoFilesPatch } = require('diff');
 const diff2htmlPage = require('../utility/diff2htmlPage');
+const processArgs = require('../utility/processArgs');
+const { testConnectionPermission } = require('../utility/hasPermission');
+const { MissingCredentialsError } = require('../utility/exceptions');
+const pipeForkLogs = require('../utility/pipeForkLogs');
+const crypto = require('crypto');
+const loadModelTransform = require('../utility/loadModelTransform');
+const exportDbModelSql = require('../utility/exportDbModelSql');
+
+const logger = getLogger('databaseConnections');
 
 module.exports = {
   /** @type {import('dbgate-types').OpenedDatabaseConnection[]} */
@@ -32,28 +43,32 @@ module.exports = {
   closed: {},
   requests: {},
 
+  async _init() {
+    connections._closeAll = conid => this.closeAll(conid);
+  },
+
   handle_structure(conid, database, { structure }) {
     const existing = this.opened.find(x => x.conid == conid && x.database == database);
     if (!existing) return;
     existing.structure = structure;
-    socket.emitChanged(`database-structure-changed-${conid}-${database}`);
+    socket.emitChanged('database-structure-changed', { conid, database });
   },
   handle_structureTime(conid, database, { analysedTime }) {
     const existing = this.opened.find(x => x.conid == conid && x.database == database);
     if (!existing) return;
     existing.analysedTime = analysedTime;
-    socket.emitChanged(`database-status-changed-${conid}-${database}`);
+    socket.emitChanged(`database-status-changed`, { conid, database });
   },
   handle_version(conid, database, { version }) {
     const existing = this.opened.find(x => x.conid == conid && x.database == database);
     if (!existing) return;
     existing.serverVersion = version;
-    socket.emitChanged(`database-server-version-changed-${conid}-${database}`);
+    socket.emitChanged(`database-server-version-changed`, { conid, database });
   },
 
   handle_error(conid, database, props) {
     const { error } = props;
-    console.log(`Error in database connection ${conid}, database ${database}: ${error}`);
+    logger.error(`Error in database connection ${conid}, database ${database}: ${error}`);
   },
   handle_response(conid, database, { msgid, ...response }) {
     const [resolve, reject] = this.requests[msgid];
@@ -61,11 +76,12 @@ module.exports = {
     delete this.requests[msgid];
   },
   handle_status(conid, database, { status }) {
+    // console.log('HANDLE SET STATUS', status);
     const existing = this.opened.find(x => x.conid == conid && x.database == database);
     if (!existing) return;
-    if (existing.status == status) return;
+    if (existing.status && status && existing.status.counter > status.counter) return;
     existing.status = status;
-    socket.emitChanged(`database-status-changed-${conid}-${database}`);
+    socket.emitChanged(`database-status-changed`, { conid, database });
   },
 
   handle_ping() {},
@@ -73,12 +89,27 @@ module.exports = {
   async ensureOpened(conid, database) {
     const existing = this.opened.find(x => x.conid == conid && x.database == database);
     if (existing) return existing;
-    const connection = await connections.get({ conid });
-    const subprocess = fork(process.argv[1], [
-      '--start-process',
-      'databaseConnectionProcess',
-      ...process.argv.slice(3),
-    ]);
+    const connection = await connections.getCore({ conid });
+    if (connection.passwordMode == 'askPassword' || connection.passwordMode == 'askUser') {
+      throw new MissingCredentialsError({ conid, passwordMode: connection.passwordMode });
+    }
+    if (connection.useRedirectDbLogin) {
+      throw new MissingCredentialsError({ conid, redirectToDbLogin: true });
+    }
+    const subprocess = fork(
+      global['API_PACKAGE'] || process.argv[1],
+      [
+        '--is-forked-api',
+        '--start-process',
+        'databaseConnectionProcess',
+        ...processArgs.getPassArgs(),
+        // ...process.argv.slice(3),
+      ],
+      {
+        stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+      }
+    );
+    pipeForkLogs(subprocess);
     const lastClosed = this.closed[`${conid}/${database}`];
     const newOpened = {
       conid,
@@ -106,24 +137,30 @@ module.exports = {
       msgtype: 'connect',
       connection: { ...connection, database },
       structure: lastClosed ? lastClosed.structure : null,
-      globalSettings: config.settingsValue,
+      globalSettings: await config.getSettings(),
     });
     return newOpened;
   },
 
   /** @param {import('dbgate-types').OpenedDatabaseConnection} conn */
   sendRequest(conn, message) {
-    const msgid = uuidv1();
+    const msgid = crypto.randomUUID();
     const promise = new Promise((resolve, reject) => {
       this.requests[msgid] = [resolve, reject];
-      conn.subprocess.send({ msgid, ...message });
+      try {
+        conn.subprocess.send({ msgid, ...message });
+      } catch (err) {
+        logger.error(extractErrorLogData(err), 'Error sending request do process');
+        this.close(conn.conid, conn.database);
+      }
     });
     return promise;
   },
 
-  queryData_meta: 'post',
-  async queryData({ conid, database, sql }) {
-    console.log(`Processing query, conid=${conid}, database=${database}, sql=${sql}`);
+  queryData_meta: true,
+  async queryData({ conid, database, sql }, req) {
+    testConnectionPermission(conid, req);
+    logger.info({ conid, database, sql }, 'Processing query');
     const opened = await this.ensureOpened(conid, database);
     // if (opened && opened.status && opened.status.name == 'error') {
     //   return opened.status;
@@ -132,30 +169,130 @@ module.exports = {
     return res;
   },
 
-  runScript_meta: 'post',
-  async runScript({ conid, database, sql }) {
-    console.log(`Processing script, conid=${conid}, database=${database}, sql=${sql}`);
+  sqlSelect_meta: true,
+  async sqlSelect({ conid, database, select }, req) {
+    testConnectionPermission(conid, req);
     const opened = await this.ensureOpened(conid, database);
-    const res = await this.sendRequest(opened, { msgtype: 'runScript', sql });
+    const res = await this.sendRequest(opened, { msgtype: 'sqlSelect', select });
     return res;
   },
 
-  collectionData_meta: 'post',
-  async collectionData({ conid, database, options }) {
+  runScript_meta: true,
+  async runScript({ conid, database, sql, useTransaction }, req) {
+    testConnectionPermission(conid, req);
+    logger.info({ conid, database, sql }, 'Processing script');
+    const opened = await this.ensureOpened(conid, database);
+    const res = await this.sendRequest(opened, { msgtype: 'runScript', sql, useTransaction });
+    return res;
+  },
+
+  runOperation_meta: true,
+  async runOperation({ conid, database, operation, useTransaction }, req) {
+    testConnectionPermission(conid, req);
+    logger.info({ conid, database, operation }, 'Processing operation');
+    const opened = await this.ensureOpened(conid, database);
+    const res = await this.sendRequest(opened, { msgtype: 'runOperation', operation, useTransaction });
+    return res;
+  },
+
+  collectionData_meta: true,
+  async collectionData({ conid, database, options }, req) {
+    testConnectionPermission(conid, req);
     const opened = await this.ensureOpened(conid, database);
     const res = await this.sendRequest(opened, { msgtype: 'collectionData', options });
-    return res.result;
+    return res.result || null;
   },
 
-  updateCollection_meta: 'post',
-  async updateCollection({ conid, database, changeSet }) {
+  async loadDataCore(msgtype, { conid, database, ...args }, req) {
+    testConnectionPermission(conid, req);
+    const opened = await this.ensureOpened(conid, database);
+    const res = await this.sendRequest(opened, { msgtype, ...args });
+    if (res.errorMessage) {
+      console.error(res.errorMessage);
+
+      return {
+        errorMessage: res.errorMessage,
+      };
+    }
+    return res.result || null;
+  },
+
+  schemaList_meta: true,
+  async schemaList({ conid, database }, req) {
+    testConnectionPermission(conid, req);
+    return this.loadDataCore('schemaList', { conid, database });
+  },
+
+  dispatchDatabaseChangedEvent_meta: true,
+  dispatchDatabaseChangedEvent({ event, conid, database }) {
+    socket.emitChanged(event, { conid, database });
+  },
+
+  loadKeys_meta: true,
+  async loadKeys({ conid, database, root, filter, limit }, req) {
+    testConnectionPermission(conid, req);
+    return this.loadDataCore('loadKeys', { conid, database, root, filter, limit });
+  },
+
+  exportKeys_meta: true,
+  async exportKeys({ conid, database, options }, req) {
+    testConnectionPermission(conid, req);
+    return this.loadDataCore('exportKeys', { conid, database, options });
+  },
+
+  loadKeyInfo_meta: true,
+  async loadKeyInfo({ conid, database, key }, req) {
+    testConnectionPermission(conid, req);
+    return this.loadDataCore('loadKeyInfo', { conid, database, key });
+  },
+
+  loadKeyTableRange_meta: true,
+  async loadKeyTableRange({ conid, database, key, cursor, count }, req) {
+    testConnectionPermission(conid, req);
+    return this.loadDataCore('loadKeyTableRange', { conid, database, key, cursor, count });
+  },
+
+  loadFieldValues_meta: true,
+  async loadFieldValues({ conid, database, schemaName, pureName, field, search, dataType }, req) {
+    testConnectionPermission(conid, req);
+    return this.loadDataCore('loadFieldValues', { conid, database, schemaName, pureName, field, search, dataType });
+  },
+
+  callMethod_meta: true,
+  async callMethod({ conid, database, method, args }, req) {
+    testConnectionPermission(conid, req);
+    return this.loadDataCore('callMethod', { conid, database, method, args });
+
+    // const opened = await this.ensureOpened(conid, database);
+    // const res = await this.sendRequest(opened, { msgtype: 'callMethod', method, args });
+    // if (res.errorMessage) {
+    //   console.error(res.errorMessage);
+    // }
+    // return res.result || null;
+  },
+
+  updateCollection_meta: true,
+  async updateCollection({ conid, database, changeSet }, req) {
+    testConnectionPermission(conid, req);
     const opened = await this.ensureOpened(conid, database);
     const res = await this.sendRequest(opened, { msgtype: 'updateCollection', changeSet });
-    return res.result;
+    if (res.errorMessage) {
+      return {
+        errorMessage: res.errorMessage,
+      };
+    }
+    return res.result || null;
   },
 
-  status_meta: 'get',
-  async status({ conid, database }) {
+  status_meta: true,
+  async status({ conid, database }, req) {
+    if (!conid) {
+      return {
+        name: 'error',
+        message: 'No connection',
+      };
+    }
+    testConnectionPermission(conid, req);
     const existing = this.opened.find(x => x.conid == conid && x.database == database);
     if (existing) {
       return {
@@ -176,13 +313,25 @@ module.exports = {
     };
   },
 
-  ping_meta: 'post',
-  async ping({ conid, database }) {
+  ping_meta: true,
+  async ping({ conid, database }, req) {
+    testConnectionPermission(conid, req);
     let existing = this.opened.find(x => x.conid == conid && x.database == database);
 
     if (existing) {
-      existing.subprocess.send({ msgtype: 'ping' });
+      try {
+        existing.subprocess.send({ msgtype: 'ping' });
+      } catch (err) {
+        logger.error(extractErrorLogData(err), 'Error pinging DB connection');
+        this.close(conid, database);
+
+        return {
+          status: 'error',
+          message: 'Ping failed',
+        };
+      }
     } else {
+      // @ts-ignore
       existing = await this.ensureOpened(conid, database);
     }
 
@@ -192,18 +341,25 @@ module.exports = {
     };
   },
 
-  refresh_meta: 'post',
-  async refresh({ conid, database, keepOpen }) {
+  refresh_meta: true,
+  async refresh({ conid, database, keepOpen }, req) {
+    testConnectionPermission(conid, req);
     if (!keepOpen) this.close(conid, database);
 
     await this.ensureOpened(conid, database);
     return { status: 'ok' };
   },
 
-  syncModel_meta: 'post',
-  async syncModel({ conid, database }) {
+  syncModel_meta: true,
+  async syncModel({ conid, database, isFullRefresh }, req) {
+    if (conid == '__model') {
+      socket.emitChanged('database-structure-changed', { conid, database });
+      return { status: 'ok' };
+    }
+
+    testConnectionPermission(conid, req);
     const conn = await this.ensureOpened(conid, database);
-    conn.subprocess.send({ msgtype: 'syncModel' });
+    conn.subprocess.send({ msgtype: 'syncModel', isFullRefresh });
     return { status: 'ok' };
   },
 
@@ -211,7 +367,13 @@ module.exports = {
     const existing = this.opened.find(x => x.conid == conid && x.database == database);
     if (existing) {
       existing.disconnected = true;
-      if (kill) existing.subprocess.kill();
+      if (kill) {
+        try {
+          existing.subprocess.kill();
+        } catch (err) {
+          logger.error(extractErrorLogData(err), 'Error killing subprocess');
+        }
+      }
       this.opened = this.opened.filter(x => x.conid != conid || x.database != database);
       this.closed[`${conid}/${database}`] = {
         status: {
@@ -220,21 +382,30 @@ module.exports = {
         },
         structure: existing.structure,
       };
-      socket.emitChanged(`database-status-changed-${conid}-${database}`);
+      socket.emitChanged(`database-status-changed`, { conid, database });
     }
   },
 
-  disconnect_meta: 'post',
-  async disconnect({ conid, database }) {
+  closeAll(conid, kill = true) {
+    for (const existing of this.opened.filter(x => x.conid == conid)) {
+      this.close(conid, existing.database, kill);
+    }
+  },
+
+  disconnect_meta: true,
+  async disconnect({ conid, database }, req) {
+    testConnectionPermission(conid, req);
     await this.close(conid, database, true);
     return { status: 'ok' };
   },
 
-  structure_meta: 'get',
-  async structure({ conid, database }) {
+  structure_meta: true,
+  async structure({ conid, database, modelTransFile = null }, req) {
+    testConnectionPermission(conid, req);
     if (conid == '__model') {
       const model = await importDbModel(database);
-      return model;
+      const trans = await loadModelTransform(modelTransFile);
+      return trans ? trans(model) : model;
     }
 
     const opened = await this.ensureOpened(conid, database);
@@ -247,14 +418,20 @@ module.exports = {
     // };
   },
 
-  serverVersion_meta: 'get',
-  async serverVersion({ conid, database }) {
+  serverVersion_meta: true,
+  async serverVersion({ conid, database }, req) {
+    if (!conid) {
+      return null;
+    }
+    testConnectionPermission(conid, req);
+    if (!conid) return null;
     const opened = await this.ensureOpened(conid, database);
-    return opened.serverVersion;
+    return opened.serverVersion || null;
   },
 
-  sqlPreview_meta: 'post',
-  async sqlPreview({ conid, database, objects, options }) {
+  sqlPreview_meta: true,
+  async sqlPreview({ conid, database, objects, options }, req) {
+    testConnectionPermission(conid, req);
     // wait for structure
     await this.structure({ conid, database });
 
@@ -263,20 +440,46 @@ module.exports = {
     return res;
   },
 
-  exportModel_meta: 'post',
-  async exportModel({ conid, database }) {
-    const archiveFolder = await archive.getNewArchiveFolder({ database });
-    await fs.mkdir(path.join(archivedir(), archiveFolder));
+  exportModel_meta: true,
+  async exportModel({ conid, database, outputFolder, schema }, req) {
+    testConnectionPermission(conid, req);
+
+    const realFolder = outputFolder.startsWith('archive:')
+      ? resolveArchiveFolder(outputFolder.substring('archive:'.length))
+      : outputFolder;
+
     const model = await this.structure({ conid, database });
-    await exportDbModel(model, path.join(archivedir(), archiveFolder));
-    socket.emitChanged(`archive-folders-changed`);
-    return { archiveFolder };
+    const filteredModel = schema ? filterStructureBySchema(model, schema) : model;
+    await exportDbModel(extendDatabaseInfo(filteredModel), realFolder);
+
+    if (outputFolder.startsWith('archive:')) {
+      socket.emitChanged(`archive-files-changed`, { folder: outputFolder.substring('archive:'.length) });
+    }
+    return { status: 'ok' };
   },
 
-  generateDeploySql_meta: 'post',
-  async generateDeploySql({ conid, database, archiveFolder }) {
+  exportModelSql_meta: true,
+  async exportModelSql({ conid, database, outputFolder, outputFile, schema }, req) {
+    testConnectionPermission(conid, req);
+
+    const connection = await connections.getCore({ conid });
+    const driver = requireEngineDriver(connection);
+
+    const model = await this.structure({ conid, database });
+    const filteredModel = schema ? filterStructureBySchema(model, schema) : model;
+    await exportDbModelSql(extendDatabaseInfo(filteredModel), driver, outputFolder, outputFile);
+
+    return { status: 'ok' };
+  },
+
+  generateDeploySql_meta: true,
+  async generateDeploySql({ conid, database, archiveFolder }, req) {
+    testConnectionPermission(conid, req);
     const opened = await this.ensureOpened(conid, database);
-    const res = await this.sendRequest(opened, { msgtype: 'generateDeploySql', modelFolder: resolveArchiveFolder(archiveFolder) });
+    const res = await this.sendRequest(opened, {
+      msgtype: 'generateDeploySql',
+      modelFolder: resolveArchiveFolder(archiveFolder),
+    });
     return res;
 
     // const connection = await connections.get({ conid });
@@ -285,7 +488,7 @@ module.exports = {
     //   analysedStructure: await this.structure({ conid, database }),
     //   modelFolder: resolveArchiveFolder(archiveFolder),
     // });
-    
+
     // const deployedModel = generateDbPairingId(await importDbModel(path.join(archivedir(), archiveFolder)));
     // const currentModel = generateDbPairingId(await this.structure({ conid, database }));
     // const currentModelPaired = matchPairedObjects(deployedModel, currentModel);
@@ -300,7 +503,7 @@ module.exports = {
     // };
     // return sql;
   },
-  // runCommand_meta: 'post',
+  // runCommand_meta: true,
   // async runCommand({ conid, database, sql }) {
   //   console.log(`Running SQL command , conid=${conid}, database=${database}, sql=${sql}`);
   //   const opened = await this.ensureOpened(conid, database);
@@ -317,8 +520,8 @@ module.exports = {
     const targetDb = generateDbPairingId(
       extendDatabaseInfo(await this.structure({ conid: targetConid, database: targetDatabase }))
     );
-    // const sourceConnection = await connections.get({conid:sourceConid})
-    const connection = await connections.get({ conid: targetConid });
+    // const sourceConnection = await connections.getCore({conid:sourceConid})
+    const connection = await connections.getCore({ conid: targetConid });
     const driver = requireEngineDriver(connection);
     const targetDbPaired = matchPairedObjects(sourceDb, targetDb, dbDiffOptions);
     const diffRows = computeDbDiffRows(sourceDb, targetDbPaired, dbDiffOptions, driver);
@@ -343,7 +546,7 @@ module.exports = {
     return res;
   },
 
-  generateDbDiffReport_meta: 'post',
+  generateDbDiffReport_meta: true,
   async generateDbDiffReport({ filePath, sourceConid, sourceDatabase, targetConid, targetDatabase }) {
     const unifiedDiff = await this.getUnifiedDiff({ sourceConid, sourceDatabase, targetConid, targetDatabase });
 

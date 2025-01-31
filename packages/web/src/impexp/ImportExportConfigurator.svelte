@@ -22,7 +22,7 @@
     for (const file of getAsArray(files)) {
       const format = findFileFormat(extensions, storage);
       if (format) {
-        await (format.addFileToSourceList || addFileToSourceListDefault)(file, newSources, newValues);
+        await (format.addFileToSourceList || addFileToSourceListDefault)(file, newSources, newValues, apiCall);
       }
     }
     newValues['sourceList'] = [...(values.sourceList || []).filter(x => !newSources.includes(x)), ...newSources];
@@ -40,15 +40,18 @@
 </script>
 
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { writable } from 'svelte/store';
+  import Link from '../elements/Link.svelte';
   import TableControl from '../elements/TableControl.svelte';
   import CheckboxField from '../forms/CheckboxField.svelte';
   import { getFormContext } from '../forms/FormProviderCore.svelte';
   import TextField from '../forms/TextField.svelte';
   import FontIcon from '../icons/FontIcon.svelte';
+  import ColumnMapModal from '../modals/ColumnMapModal.svelte';
+  import { showModal } from '../modals/modalTools';
   import { findFileFormat } from '../plugins/fileformats';
   import { extensions } from '../stores';
+  import { apiCall } from '../utility/api';
   import getAsArray from '../utility/getAsArray';
   import { useConnectionInfo, useDatabaseInfo } from '../utility/metadataLoaders';
   import { setUploadListener } from '../utility/uploadFiles';
@@ -57,15 +60,34 @@
   import SourceName from './SourceName.svelte';
 
   import SourceTargetConfig from './SourceTargetConfig.svelte';
+  import useEffect from '../utility/useEffect';
+  import { compositeDbNameIfNeeded } from 'dbgate-tools';
+  import createRef from '../utility/createRef';
+  import DropDownButton from '../buttons/DropDownButton.svelte';
 
-  export let uploadedFile = undefined;
-  export let openedFile = undefined;
+  // export let uploadedFile = undefined;
+  // export let openedFile = undefined;
   export let previewReaderStore;
+  export let isTabActive;
 
   const { values, setFieldValue } = getFormContext();
 
-  $: targetDbinfo = useDatabaseInfo({ conid: $values.targetConnectionId, database: $values.targetDatabaseName });
+  // $: console.log('VALUES', $values);
+  // $: console.log('$sourceDbinfo', $sourceDbinfo);
+  // $: console.log('$targetDbinfo', $targetDbinfo);
+
   $: sourceConnectionInfo = useConnectionInfo({ conid: $values.sourceConnectionId });
+  $: targetConnectionInfo = useConnectionInfo({ conid: $values.targetConnectionId });
+
+  $: sourceDbinfo = useDatabaseInfo({
+    conid: $values.sourceConnectionId,
+    database: compositeDbNameIfNeeded($sourceConnectionInfo, $values.sourceDatabaseName, $values.sourceSchemaName),
+  });
+  $: targetDbinfo = useDatabaseInfo({
+    conid: $values.targetConnectionId,
+    database: compositeDbNameIfNeeded($targetConnectionInfo, $values.targetDatabaseName, $values.targetSchemaName),
+  });
+
   $: sourceEngine = $sourceConnectionInfo?.engine;
   $: sourceList = $values.sourceList;
 
@@ -88,7 +110,7 @@
     }
   };
 
-  const handleUpload = file => {
+  export function addUploadedFile(file) {
     addFilesToSourceList(
       $extensions,
       [
@@ -103,36 +125,45 @@
       previewSource.set
     );
     // setFieldValue('sourceList', [...(sourceList || []), file.originalName]);
-  };
+  }
 
-  onMount(() => {
-    setUploadListener(handleUpload);
-    if (uploadedFile) {
-      handleUpload(uploadedFile);
+  $: effectActiveTab = useEffect(() => {
+    if (isTabActive) {
+      setUploadListener(addUploadedFile);
+      return () => {
+        setUploadListener(null);
+      };
+    } else {
+      return () => {};
     }
-    if (openedFile) {
-      handleUpload(openedFile);
-      // addFilesToSourceList(
-      //   $extensions,
-      //   [
-      //     {
-      //       fileName: openedFile.filePath,
-      //       shortName: openedFile.shortName,
-      //     },
-      //   ],
-      //   $values,
-      //   values,
-      //   !sourceList || sourceList.length == 0 ? openedFile.storageType : null,
-      //   previewSource.set
-      // );
-    }
-
-    return () => {
-      setUploadListener(null);
-    };
   });
-  //   engine={sourceEngine}
-  //       {setPreviewSource}
+
+  const lastSourcesRef = createRef(null);
+  function setFixedTargetForNewSources(values, valuesStore) {
+    if (lastSourcesRef.get() && values.fixedTargetPureName) {
+      const newSources = values.sourceList.filter(x => !lastSourcesRef.get()?.includes(x));
+      const newValues = {};
+      for (const source of newSources) {
+        if (values.fixedTargetPureName) {
+          if (!values[`targetName_${source}`]) {
+            newValues[`targetName_${source}`] = values.fixedTargetPureName;
+          }
+          if (!values[`actionType_${source}`]) {
+            newValues[`actionType_${source}`] = 'appendData';
+          }
+        }
+      }
+      valuesStore.set({
+        ...values,
+        ...newValues,
+      });
+    }
+    lastSourcesRef.set(values.sourceList);
+  }
+
+  $: setFixedTargetForNewSources($values, values);
+
+  $effectActiveTab;
 </script>
 
 <div class="flex1">
@@ -189,6 +220,11 @@
           header: 'Preview',
           slot: 0,
         },
+        {
+          fieldName: 'columns',
+          header: 'Columns',
+          slot: 2,
+        },
       ]}
     >
       <svelte:fragment slot="0" let:row>
@@ -204,15 +240,42 @@
         {/if}
       </svelte:fragment>
       <svelte:fragment slot="1" let:row>
-        <TextField
-          value={getTargetName($extensions, row, $values)}
-          on:input={e =>
-            setFieldValue(
-              `targetName_${row}`,
-              // @ts-ignore
-              e.target.value
-            )}
-        />
+        <div class="flex">
+          <TextField
+            value={getTargetName($extensions, row, $values)}
+            on:input={e =>
+              setFieldValue(
+                `targetName_${row}`,
+                // @ts-ignore
+                e.target.value
+              )}
+          />
+          {#if $targetDbinfo}
+            <DropDownButton
+              menu={() => {
+                return $targetDbinfo.tables.map(opt => ({
+                  text: opt.pureName,
+                  onClick: () => setFieldValue(`targetName_${row}`, opt.pureName),
+                }));
+              }}
+            />
+          {/if}
+        </div>
+      </svelte:fragment>
+      <svelte:fragment slot="2" let:row>
+        {@const columnCount = ($values[`columns_${row}`] || []).filter(x => !x.skip).length}
+        <Link
+          onClick={() => {
+            const targetNameLower = ($values[`targetName_${row}`] || row)?.toLowerCase();
+            showModal(ColumnMapModal, {
+              initialValue: $values[`columns_${row}`],
+              sourceTableInfo: $sourceDbinfo?.tables?.find(x => x.pureName?.toLowerCase() == row?.toLowerCase()),
+              targetTableInfo: $targetDbinfo?.tables?.find(x => x.pureName?.toLowerCase() == targetNameLower),
+              onConfirm: value => setFieldValue(`columns_${row}`, value),
+            });
+          }}
+          >{columnCount > 0 ? `(${columnCount} columns)` : '(copy from source)'}
+        </Link>
       </svelte:fragment>
     </TableControl>
   </div>

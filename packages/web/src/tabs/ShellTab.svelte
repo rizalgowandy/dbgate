@@ -12,6 +12,7 @@
     execute: true,
     toggleComment: true,
     findReplace: true,
+    executeAdditionalCondition: () => getCurrentConfig().allowShellScripting,
   });
 
   registerCommand({
@@ -22,44 +23,36 @@
     onClick: () => getCurrentEditor().copyNodeScript(),
   });
 
-  // registerCommand({
-  //   id: 'shell.openWizard',
-  //   category: 'Shell',
-  //   name: 'Open wizard',
-  //   // testEnabled: () => getCurrentEditor()?.openWizardEnabled(),
-  //   onClick: () => getCurrentEditor().openWizard(),
-  // });
-
-  const configRegex = /\s*\/\/\s*@ImportExportConfigurator\s*\n\s*\/\/\s*(\{[^\n]+\})\n/;
   const requireRegex = /\s*(\/\/\s*@require\s+[^\n]+)\n/g;
   const initRegex = /([^\n]+\/\/\s*@init)/g;
 </script>
 
 <script lang="ts">
   import { getContext } from 'svelte';
+  import ToolStripCommandButton from '../buttons/ToolStripCommandButton.svelte';
+  import ToolStripContainer from '../buttons/ToolStripContainer.svelte';
+  import ToolStripSaveButton from '../buttons/ToolStripSaveButton.svelte';
 
   import invalidateCommands from '../commands/invalidateCommands';
   import registerCommand from '../commands/registerCommand';
   import { registerFileCommands } from '../commands/stdCommands';
 
   import VerticalSplitter from '../elements/VerticalSplitter.svelte';
-  import ImportExportModal from '../modals/ImportExportModal.svelte';
-  import { showModal } from '../modals/modalTools';
   import AceEditor from '../query/AceEditor.svelte';
   import RunnerOutputPane from '../query/RunnerOutputPane.svelte';
   import useEditorData from '../query/useEditorData';
-  import axiosInstance from '../utility/axiosInstance';
+  import { getCurrentConfig } from '../stores';
+  import { apiCall, apiOff, apiOn } from '../utility/api';
   import { copyTextToClipboard } from '../utility/clipboard';
   import { changeTab } from '../utility/common';
   import createActivator, { getActiveComponent } from '../utility/createActivator';
   import { showSnackbarError } from '../utility/snackbar';
-  import socket from '../utility/socket';
   import useEffect from '../utility/useEffect';
   import useTimerLabel from '../utility/useTimerLabel';
-
+  
   export let tabid;
 
-  const tabVisible: any = getContext('tabVisible');
+  const tabFocused: any = getContext('tabFocused');
   const timerLabel = useTimerLabel();
 
   let runnerId;
@@ -70,6 +63,7 @@
   let executeNumber = 0;
 
   let domEditor;
+  let domToolStrip;
 
   // const status = writable({
   //   busy,
@@ -88,7 +82,7 @@
     invalidateCommands();
   }
 
-  $: if ($tabVisible && domEditor) {
+  $: if ($tabFocused && domEditor) {
     domEditor?.getEditor()?.focus();
   }
 
@@ -101,9 +95,9 @@
 
   function registerRunnerDone(rid) {
     if (rid) {
-      socket.on(`runner-done-${rid}`, handleRunnerDone);
+      apiOn(`runner-done-${rid}`, handleRunnerDone);
       return () => {
-        socket.off(`runner-done-${rid}`, handleRunnerDone);
+        apiOff(`runner-done-${rid}`, handleRunnerDone);
       };
     } else {
       return () => {};
@@ -140,21 +134,8 @@
   }
 
   export async function copyNodeScript() {
-    const resp = await axiosInstance.post('runners/get-node-script', { script: getActiveScript() });
-    copyTextToClipboard(resp.data);
-  }
-
-  // export function openWizardEnabled() {
-  //   return ($editorValue || '').match(configRegex);
-  // }
-
-  export function openWizard() {
-    const jsonTextMatch = ($editorValue || '').match(configRegex);
-    if (jsonTextMatch) {
-      showModal(ImportExportModal, { initialValues: JSON.parse(jsonTextMatch[1]) });
-    } else {
-      showSnackbarError('No wizard info found');
-    }
+    const resp = await apiCall('runners/get-node-script', { script: getActiveScript() });
+    copyTextToClipboard(resp);
   }
 
   function getActiveScript() {
@@ -172,10 +153,15 @@
     executeNumber += 1;
 
     let runid = runnerId;
-    const resp = await axiosInstance.post('runners/start', {
+    const resp = await apiCall('runners/start', {
       script: getActiveScript(),
     });
-    runid = resp.data.runid;
+    if (resp.errorMessage) {
+      showSnackbarError(resp.errorMessage);
+      return;
+    }
+
+    runid = resp.runid;
     runnerId = runid;
     busy = true;
     timerLabel.start();
@@ -186,7 +172,7 @@
   }
 
   export function kill() {
-    axiosInstance.post('runners/cancel', {
+    apiCall('runners/cancel', {
       runid: runnerId,
     });
     timerLabel.stop();
@@ -198,7 +184,6 @@
     return [
       { command: 'shell.execute' },
       { command: 'shell.kill' },
-      { command: 'shell.openWizard' },
       { divider: true },
       { command: 'shell.toggleComment' },
       { divider: true },
@@ -212,21 +197,30 @@
   }
 </script>
 
-<VerticalSplitter>
-  <svelte:fragment slot="1">
-    <AceEditor
-      value={$editorState.value || ''}
-      menu={createMenu()}
-      on:input={e => setEditorData(e.detail)}
-      on:focus={() => {
-        activator.activate();
-        invalidateCommands();
-      }}
-      bind:this={domEditor}
-      mode="javascript"
-    />
+<ToolStripContainer bind:this={domToolStrip}>
+  <VerticalSplitter>
+    <svelte:fragment slot="1">
+      <AceEditor
+        value={$editorState.value || ''}
+        menu={createMenu()}
+        on:input={e => setEditorData(e.detail)}
+        on:focus={() => {
+          activator.activate();
+          domToolStrip?.activate();
+          invalidateCommands();
+        }}
+        bind:this={domEditor}
+        mode="javascript"
+      />
+    </svelte:fragment>
+    <svelte:fragment slot="2">
+      <RunnerOutputPane {runnerId} {executeNumber} />
+    </svelte:fragment>
+  </VerticalSplitter>
+  <svelte:fragment slot="toolstrip">
+    <ToolStripCommandButton command="shell.execute" />
+    <ToolStripCommandButton command="shell.kill" />
+    <ToolStripSaveButton idPrefix="shell" />
+    <ToolStripCommandButton command="shell.copyNodeScript" />
   </svelte:fragment>
-  <svelte:fragment slot="2">
-    <RunnerOutputPane {runnerId} {executeNumber} />
-  </svelte:fragment>
-</VerticalSplitter>
+</ToolStripContainer>

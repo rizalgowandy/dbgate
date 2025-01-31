@@ -1,4 +1,4 @@
-import { SqlDumper } from 'dbgate-types';
+import type { SqlDumper } from 'dbgate-types';
 import { Command, Select, Update, Delete, Insert } from './types';
 import { dumpSqlExpression } from './dumpSqlExpression';
 import { dumpSqlFromDefinition, dumpSqlSourceRef } from './dumpSqlSource';
@@ -15,7 +15,7 @@ export function dumpSqlSelect(dmp: SqlDumper, cmd: Select) {
   if (cmd.selectAll) {
     dmp.put('* ');
   }
-  if (cmd.columns) {
+  if (cmd.columns && cmd.columns.length > 0) {
     if (cmd.selectAll) dmp.put('&n,');
     dmp.put('&>&n');
     dmp.putCollection(',&n', cmd.columns, fld => {
@@ -62,10 +62,13 @@ export function dumpSqlSelect(dmp: SqlDumper, cmd: Select) {
 }
 
 export function dumpSqlUpdate(dmp: SqlDumper, cmd: Update) {
-  dmp.put('^update ');
-  dumpSqlSourceRef(dmp, cmd.from);
-
-  dmp.put('&n^set ');
+  if (cmd.alterTableUpdateSyntax) {
+    dmp.put('^alter ^table %f &n^update ', cmd.from?.name);
+  } else {
+    dmp.put('^update ');
+    dumpSqlSourceRef(dmp, cmd.from);
+    dmp.put('&n^set ');
+  }
   dmp.put('&>');
   dmp.putCollection(', ', cmd.fields, col => {
     dmp.put('%i=', col.targetColumn);
@@ -81,8 +84,14 @@ export function dumpSqlUpdate(dmp: SqlDumper, cmd: Update) {
 }
 
 export function dumpSqlDelete(dmp: SqlDumper, cmd: Delete) {
-  dmp.put('^delete ^from ');
-  dumpSqlSourceRef(dmp, cmd.from);
+  if (cmd.alterTableDeleteSyntax) {
+    dmp.put('^alter ^table ');
+    dumpSqlSourceRef(dmp, cmd.from);
+    dmp.put(' ^delete ');
+  } else {
+    dmp.put('^delete ^from ');
+    dumpSqlSourceRef(dmp, cmd.from);
+  }
 
   if (cmd.where) {
     dmp.put('&n^where ');
@@ -92,13 +101,28 @@ export function dumpSqlDelete(dmp: SqlDumper, cmd: Delete) {
 }
 
 export function dumpSqlInsert(dmp: SqlDumper, cmd: Insert) {
-  dmp.put(
-    '^insert ^into %f (%,i) ^values (',
-    cmd.targetTable,
-    cmd.fields.map(x => x.targetColumn)
-  );
-  dmp.putCollection(',', cmd.fields, x => dumpSqlExpression(dmp, x));
-  dmp.put(')');
+  if (cmd.insertWhereNotExistsCondition) {
+    dmp.put(
+      '^insert ^into %f (%,i) ^select ',
+      cmd.targetTable,
+      cmd.fields.map(x => x.targetColumn)
+    );
+    dmp.putCollection(',', cmd.fields, x => dumpSqlExpression(dmp, x));
+    if (dmp.dialect.requireFromDual) {
+      dmp.put(' ^from ^dual ');
+    }
+    dmp.put(' ^where ^not ^exists (^select * ^from %f ^where ', cmd.targetTable);
+    dumpSqlCondition(dmp, cmd.insertWhereNotExistsCondition);
+    dmp.put(')');
+  } else {
+    dmp.put(
+      '^insert ^into %f (%,i) ^values (',
+      cmd.targetTable,
+      cmd.fields.map(x => x.targetColumn)
+    );
+    dmp.putCollection(',', cmd.fields, x => dumpSqlExpression(dmp, x));
+    dmp.put(')');
+  }
 }
 
 export function dumpSqlCommand(dmp: SqlDumper, cmd: Command) {

@@ -22,41 +22,58 @@
   export let disableContextMenu = false;
   export let isExpandedBySearch = false;
   export let passProps;
+  export let getIsExpanded = null;
+  export let setIsExpanded = null;
+  export let isMainMatched = false;
 
-  let isExpanded = false;
+  let isExpandedCore = false;
 
   async function handleExpand() {
     if (subItemsComponent && expandOnClick) {
       await tick();
-      isExpanded = !isExpanded;
+      handleExpandButton();
     }
   }
 
   function handleExpandButton() {
-    isExpanded = !isExpanded;
+    if (getIsExpanded && setIsExpanded) {
+      setIsExpanded(data, !isExpanded);
+    } else {
+      isExpandedCore = !isExpandedCore;
+    }
   }
 
   $: expandable = data && isExpandable && isExpandable(data);
-
-  $: if (!expandable && isExpanded) isExpanded = false;
+  $: isExpanded = expandable ? (getIsExpanded && setIsExpanded ? getIsExpanded(data) : isExpandedCore) : false;
 </script>
 
 {#if !isHidden}
   <svelte:component
     this={module.default}
     {data}
-    on:click={handleExpand}
+    on:dblclick={handleExpand}
     on:expand={handleExpandButton}
     expandIcon={getExpandIcon(!isExpandedBySearch && expandable, subItemsComponent, isExpanded, expandIconFunc)}
     {checkedObjectsStore}
     {module}
     {disableContextMenu}
     {passProps}
+    {filter}
   />
 
   {#if (isExpanded || isExpandedBySearch) && subItemsComponent}
     <div class="subitems">
-      <svelte:component this={subItemsComponent} {data} {filter} {passProps} />
+      <svelte:component
+        this={subItemsComponent(data, {
+          isExpandedBySearch,
+        })}
+        {data}
+        {filter}
+        {passProps}
+        {isExpandedBySearch}
+        {isExpanded}
+        {isMainMatched}
+      />
     </div>
   {/if}
 {/if}

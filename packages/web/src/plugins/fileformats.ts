@@ -1,9 +1,10 @@
-import { FileFormatDefinition, QuickExportDefinition } from 'dbgate-types';
+import type { FileFormatDefinition, QuickExportDefinition } from 'dbgate-types';
 
 const jsonlFormat = {
   storageType: 'jsonl',
   extension: 'jsonl',
-  name: 'JSON lines',
+  extensions: ['jsonl', 'ndjson'],
+  name: 'JSON lines/NDJSON',
   readerFunc: 'jsonLinesReader',
   writerFunc: 'jsonLinesWriter',
 };
@@ -12,7 +13,33 @@ const jsonFormat = {
   storageType: 'json',
   extension: 'json',
   name: 'JSON',
-  writerFunc: 'jsonArrayWriter',
+  readerFunc: 'jsonReader',
+  writerFunc: 'jsonWriter',
+
+  args: [
+    {
+      type: 'select',
+      name: 'jsonStyle',
+      label: 'JSON style',
+      options: [
+        { name: 'Array', value: '' },
+        { name: 'Object', value: 'object' },
+      ],
+      apiName: 'jsonStyle',
+    },
+    {
+      type: 'text',
+      name: 'keyField',
+      label: 'Key field (only for "Object" style)',
+      apiName: 'keyField',
+    },
+    {
+      type: 'text',
+      name: 'rootField',
+      label: 'Root field',
+      apiName: 'rootField',
+    },
+  ],
 };
 
 const sqlFormat = {
@@ -23,7 +50,7 @@ const sqlFormat = {
 };
 
 const jsonlQuickExport = {
-  label: 'JSON lines',
+  label: 'JSON lines/NDJSON',
   extension: 'jsonl',
   createWriter: fileName => ({
     functionName: 'jsonLinesWriter',
@@ -37,7 +64,7 @@ const jsonQuickExport = {
   label: 'JSON',
   extension: 'json',
   createWriter: fileName => ({
-    functionName: 'jsonArrayWriter',
+    functionName: 'jsonWriter',
     props: {
       fileName,
     },
@@ -47,10 +74,11 @@ const jsonQuickExport = {
 const sqlQuickExport = {
   label: 'SQL',
   extension: 'sql',
-  createWriter: fileName => ({
+  createWriter: (fileName, dataName) => ({
     functionName: 'sqlDataWriter',
     props: {
       fileName,
+      dataName,
     },
   }),
 };

@@ -1,6 +1,10 @@
 var webpack = require('webpack');
 var path = require('path');
 
+const packageJson = require('./package.json');
+const buildPluginExternals = require('../../common/buildPluginExternals');
+const externals = buildPluginExternals(packageJson);
+
 var config = {
   context: __dirname + '/src/backend',
 
@@ -18,6 +22,8 @@ var config = {
   //   optimization: {
   //     minimize: false,
   //   },
+
+  externals,
 };
 
 module.exports = config;

@@ -7,7 +7,7 @@
 
   import HorizontalSplitter from '../elements/HorizontalSplitter.svelte';
 
-  import LargeButton from '../elements/LargeButton.svelte';
+  import LargeButton from '../buttons/LargeButton.svelte';
   import SearchBoxWrapper from '../elements/SearchBoxWrapper.svelte';
   import SearchInput from '../elements/SearchInput.svelte';
   import FormCheckboxField from '../forms/FormCheckboxField.svelte';
@@ -18,7 +18,6 @@
 
   import FontIcon from '../icons/FontIcon.svelte';
   import SqlEditor from '../query/SqlEditor.svelte';
-  import axiosInstance from '../utility/axiosInstance';
   import createRef from '../utility/createRef';
   import { useDatabaseInfo } from '../utility/metadataLoaders';
   import WidgetColumnBar from '../widgets/WidgetColumnBar.svelte';
@@ -32,6 +31,7 @@
   import ErrorInfo from '../elements/ErrorInfo.svelte';
   import LoadingInfo from '../elements/LoadingInfo.svelte';
   import { getObjectTypeFieldLabel } from '../utility/common';
+  import { apiCall } from '../utility/api';
 
   export let conid;
   export let database;
@@ -74,7 +74,7 @@
   $: generatePreview($valuesStore, $checkedObjectsStore);
 
   $: objectList = _.flatten(
-    ['tables', 'views', 'matviews', 'procedures', 'functions'].map(objectTypeField =>
+    ['tables', 'views', 'matviews', 'procedures', 'functions', 'triggers', 'schedulerEvents'].map(objectTypeField =>
       _.sortBy(
         (($dbinfo || {})[objectTypeField] || []).map(obj => ({ ...obj, objectTypeField })),
         ['schemaName', 'pureName']
@@ -86,7 +86,7 @@
     const loadid = uuidv1();
     loadRef.set(loadid);
     busy = true;
-    const response = await axiosInstance.post('database-connections/sql-preview', {
+    const response = await apiCall('database-connections/sql-preview', {
       conid,
       database,
       objects,
@@ -96,7 +96,7 @@
       // newer load exists
       return;
     }
-    const { sql, isTruncated, isError, errorMessage } = response.data || {};
+    const { sql, isTruncated, isError, errorMessage } = response || {};
 
     truncated = isTruncated;
     if (isError) {
@@ -116,6 +116,7 @@
         title: 'Query #',
         icon: 'img sql-file',
         tabComponent: 'QueryTab',
+        focused: true,
         props: {
           conid,
           database,
@@ -127,7 +128,6 @@
     );
     closeCurrentModal();
   }
-
 </script>
 
 <FormProviderCore values={valuesStore} template={FormFieldTemplateTiny}>
@@ -214,8 +214,8 @@
 
                   <FormCheckboxField label="Truncate tables (delete all rows)" name="truncate" />
 
-                  {#each ['View', 'Matview', 'Procedure', 'Function', 'Trigger'] as objtype}
-                    <div class="obj-heading">{getObjectTypeFieldLabel(objtype.toLowerCase() + 's')}s</div>
+                  {#each ['View', 'Matview', 'Procedure', 'Function', 'Trigger', 'SchedulerEvent'] as objtype}
+                    <div class="obj-heading">{getObjectTypeFieldLabel(objtype + 's')}</div>
                     <FormCheckboxField label="Create" name={`create${objtype}s`} />
                     <FormCheckboxField label="Drop" name={`drop${objtype}s`} />
                     {#if values[`drop${objtype}s`]}
@@ -257,5 +257,4 @@
   .dbname {
     color: var(--theme-font-3);
   }
-
 </style>

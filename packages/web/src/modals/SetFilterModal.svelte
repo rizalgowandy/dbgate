@@ -9,14 +9,24 @@
   import ModalBase from './ModalBase.svelte';
   import { closeCurrentModal } from './modalTools';
   import FormRadioGroupItem from '../forms/FormRadioGroupItem.svelte';
+  import FormValues from '../forms/FormValues.svelte';
 
   export let condition1;
   export let onFilter;
-  export let filterType;
+  export let filterBehaviour;
+
+  const hasOperand = condition => {
+    return condition != 'NULL' && condition != 'NOT NULL' && condition != 'EXISTS' && condition != 'NOT EXISTS';
+  };
 
   const createTerm = (condition, value) => {
+    if (!hasOperand(condition)) return condition;
     if (!value) return null;
-    if (filterType == 'string') return `${condition}"${value}"`;
+    if (condition == 'sql') return `{${value}}`;
+    if (condition == 'sqlRight') return `{$$ ${value}}`;
+    if (filterBehaviour.allowStringToken) {
+      return `${condition}"${value}"`;
+    }
     return `${condition}${value}`;
   };
 
@@ -40,10 +50,14 @@
       <div class="row">Show rows where</div>
       <div class="row">
         <div class="col-6 mr-1">
-          <SetFilterModal_Select {filterType} name="condition1" />
+          <SetFilterModal_Select {filterBehaviour} name="condition1" />
         </div>
         <div class="col-6 mr-1">
-          <FormTextFieldRaw name="value1" focused />
+          <FormValues let:values>
+            {#if hasOperand(values.condition1)}
+              <FormTextFieldRaw name="value1" focused />
+            {/if}
+          </FormValues>
         </div>
       </div>
 
@@ -54,10 +68,14 @@
 
       <div class="row">
         <div class="col-6 mr-1">
-          <SetFilterModal_Select {filterType} name="condition2" />
+          <SetFilterModal_Select {filterBehaviour} name="condition2" />
         </div>
         <div class="col-6 mr-1">
-          <FormTextFieldRaw name="value2" />
+          <FormValues let:values>
+            {#if hasOperand(values.condition2)}
+              <FormTextFieldRaw name="value2" />
+            {/if}
+          </FormValues>
         </div>
       </div>
     </div>

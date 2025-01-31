@@ -7,12 +7,12 @@ const socket = require('../utility/socket');
 const compareVersions = require('compare-versions');
 const requirePlugin = require('../shell/requirePlugin');
 const downloadPackage = require('../utility/downloadPackage');
-const hasPermission = require('../utility/hasPermission');
+const { hasPermission } = require('../utility/hasPermission');
 const _ = require('lodash');
 const packagedPluginsContent = require('../packagedPluginsContent');
 
 module.exports = {
-  script_meta: 'get',
+  script_meta: true,
   async script({ packageName }) {
     const packagedContent = packagedPluginsContent();
 
@@ -30,7 +30,7 @@ module.exports = {
     return data;
   },
 
-  search_meta: 'get',
+  search_meta: true,
   async search({ filter }) {
     // DOCS: https://github.com/npm/registry/blob/master/docs/REGISTRY-API.md#get-v1search
     const resp = await axios.default.get(
@@ -40,15 +40,16 @@ module.exports = {
     return (objects || []).map(x => x.package);
   },
 
-  info_meta: 'get',
+  info_meta: true,
   async info({ packageName }) {
+    // @ts-ignore
+    const isPackaged = await fs.exists(path.join(packagedPluginsDir(), packageName));
+
     try {
       const infoResp = await axios.default.get(`https://registry.npmjs.org/${packageName}`);
       const { latest } = infoResp.data['dist-tags'];
       const manifest = infoResp.data.versions[latest];
       const { readme } = infoResp.data;
-      // @ts-ignore
-      const isPackaged = await fs.exists(path.join(packagedPluginsDir(), packageName));
 
       return {
         readme,
@@ -57,13 +58,14 @@ module.exports = {
       };
     } catch (err) {
       return {
+        isPackaged,
         state: 'error',
         error: err.message,
       };
     }
   },
 
-  installed_meta: 'get',
+  installed_meta: true,
   async installed() {
     const packagedContent = packagedPluginsContent();
 
@@ -72,6 +74,7 @@ module.exports = {
 
     const res = [];
     for (const packageName of _.union(files1, files2)) {
+      if (packageName == 'dist') continue;
       if (!/^dbgate-plugin-.*$/.test(packageName)) continue;
       try {
         if (packagedContent && packagedContent[packageName]) {
@@ -88,6 +91,12 @@ module.exports = {
               encoding: 'utf-8',
             })
             .then(x => JSON.parse(x));
+          if (!manifest.keywords) {
+            continue;
+          }
+          if (!manifest.keywords.includes('dbgateplugin') && !manifest.keywords.includes('dbgatebuiltin')) {
+            continue;
+          }
           const readmeFile = path.join(isPackaged ? packagedPluginsDir() : pluginsdir(), packageName, 'README.md');
           // @ts-ignore
           if (await fs.exists(readmeFile)) {
@@ -107,9 +116,9 @@ module.exports = {
   //   await fs.writeFile(path.join(datadir(), 'removed-plugins'), this.removedPlugins.join('\n'));
   // },
 
-  install_meta: 'post',
-  async install({ packageName }) {
-    if (!hasPermission(`plugins/install`)) return;
+  install_meta: true,
+  async install({ packageName }, req) {
+    if (!hasPermission(`plugins/install`, req)) return;
     const dir = path.join(pluginsdir(), packageName);
     // @ts-ignore
     if (!(await fs.exists(dir))) {
@@ -118,21 +127,23 @@ module.exports = {
     socket.emitChanged(`installed-plugins-changed`);
     // this.removedPlugins = this.removedPlugins.filter(x => x != packageName);
     // await this.saveRemovePlugins();
+    return true;
   },
 
-  uninstall_meta: 'post',
-  async uninstall({ packageName }) {
-    if (!hasPermission(`plugins/install`)) return;
+  uninstall_meta: true,
+  async uninstall({ packageName }, req) {
+    if (!hasPermission(`plugins/install`, req)) return;
     const dir = path.join(pluginsdir(), packageName);
     await fs.rmdir(dir, { recursive: true });
     socket.emitChanged(`installed-plugins-changed`);
     // this.removedPlugins.push(packageName);
-    await this.saveRemovePlugins();
+    // await this.saveRemovePlugins();
+    return true;
   },
 
-  upgrade_meta: 'post',
-  async upgrade({ packageName }) {
-    if (!hasPermission(`plugins/install`)) return;
+  upgrade_meta: true,
+  async upgrade({ packageName }, req) {
+    if (!hasPermission(`plugins/install`, req)) return;
     const dir = path.join(pluginsdir(), packageName);
     // @ts-ignore
     if (await fs.exists(dir)) {
@@ -141,17 +152,19 @@ module.exports = {
     }
 
     socket.emitChanged(`installed-plugins-changed`);
+    return true;
   },
 
-  command_meta: 'post',
+  command_meta: true,
   async command({ packageName, command, args }) {
     const content = requirePlugin(packageName);
     return content.commands[command](args);
   },
 
-  authTypes_meta: 'get',
+  authTypes_meta: true,
   async authTypes({ engine }) {
     const packageName = extractPackageName(engine);
+    if (!packageName) return null;
     const content = requirePlugin(packageName);
     const driver = content.drivers.find(x => x.engine == engine);
     if (!driver || !driver.getAuthTypes) return null;

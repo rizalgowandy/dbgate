@@ -1,7 +1,10 @@
 import _ from 'lodash';
 import { addCompleter, setCompleters } from 'ace-builds/src-noconflict/ext-language_tools';
-import { getDatabaseInfo } from '../utility/metadataLoaders';
+import { getConnectionInfo, getDatabaseInfo, getSchemaList } from '../utility/metadataLoaders';
 import analyseQuerySources from './analyseQuerySources';
+import { getStringSettingsValue } from '../settings/settingsTools';
+import { findEngineDriver, findDefaultSchema } from 'dbgate-tools';
+import { getExtensions } from '../stores';
 
 const COMMON_KEYWORDS = [
   'select',
@@ -23,6 +26,53 @@ const COMMON_KEYWORDS = [
   'go',
 ];
 
+function createTableLikeList(schemaList, dbinfo, schemaCondition) {
+  return [
+    ...(schemaList?.map(x => ({
+      name: x.schemaName,
+      value: x.schemaName,
+      caption: x.schemaName,
+      meta: 'schema',
+      score: 1000,
+    })) || []),
+    ...dbinfo.tables.filter(schemaCondition).map(x => ({
+      name: x.pureName,
+      value: x.pureName,
+      caption: x.pureName,
+      meta: 'table',
+      score: 1000,
+    })),
+    ...dbinfo.views.filter(schemaCondition).map(x => ({
+      name: x.pureName,
+      value: x.pureName,
+      caption: x.pureName,
+      meta: 'view',
+      score: 1000,
+    })),
+    ...dbinfo.matviews.filter(schemaCondition).map(x => ({
+      name: x.pureName,
+      value: x.pureName,
+      caption: x.pureName,
+      meta: 'matview',
+      score: 1000,
+    })),
+    ...dbinfo.functions.filter(schemaCondition).map(x => ({
+      name: x.pureName,
+      value: x.pureName,
+      caption: x.pureName,
+      meta: 'function',
+      score: 1000,
+    })),
+    ...dbinfo.procedures.filter(schemaCondition).map(x => ({
+      name: x.pureName,
+      value: x.pureName,
+      caption: x.pureName,
+      meta: 'procedure',
+      score: 1000,
+    })),
+  ];
+}
+
 export function mountCodeCompletion({ conid, database, editor, getText }) {
   setCompleters([]);
   addCompleter({
@@ -30,14 +80,26 @@ export function mountCodeCompletion({ conid, database, editor, getText }) {
       const cursor = session.selection.cursor;
       const line = session.getLine(cursor.row).slice(0, cursor.column);
       const dbinfo = await getDatabaseInfo({ conid, database });
+      const schemaList = await getSchemaList({ conid, database });
+      const connection = await getConnectionInfo({ conid });
+      const driver = findEngineDriver(connection, getExtensions());
+      const defaultSchema = findDefaultSchema(schemaList, driver.dialect);
 
-      let list = COMMON_KEYWORDS.map(word => ({
-        name: word,
-        value: word,
-        caption: word,
-        meta: 'keyword',
-        score: 800,
-      }));
+      const convertUpper = getStringSettingsValue('sqlEditor.sqlCommandsCase', 'upperCase') == 'upperCase';
+
+      let list = COMMON_KEYWORDS.map(word => {
+        if (convertUpper) {
+          word = word.toUpperCase();
+        }
+
+        return {
+          name: word,
+          value: word,
+          caption: word,
+          meta: 'keyword',
+          score: 800,
+        };
+      });
 
       if (dbinfo) {
         const colMatch = line.match(/([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]*)?$/);
@@ -90,6 +152,11 @@ export function mountCodeCompletion({ conid, database, editor, getText }) {
                 })),
               ];
             }
+          } else {
+            const schema = (schemaList || []).find(x => x.schemaName == colMatch[1]);
+            if (schema) {
+              list = createTableLikeList(schemaList, dbinfo, x => x.schemaName == schema.schemaName);
+            }
           }
         } else {
           const onlyTables =
@@ -106,46 +173,13 @@ export function mountCodeCompletion({ conid, database, editor, getText }) {
           } else {
             list = [
               ...(onlyTables ? [] : list),
-              ...dbinfo.tables.map(x => ({
-                name: x.pureName,
-                value: x.pureName,
-                caption: x.pureName,
-                meta: 'table',
-                score: 1000,
-              })),
-              ...dbinfo.views.map(x => ({
-                name: x.pureName,
-                value: x.pureName,
-                caption: x.pureName,
-                meta: 'view',
-                score: 1000,
-              })),
-              ...dbinfo.matviews.map(x => ({
-                name: x.pureName,
-                value: x.pureName,
-                caption: x.pureName,
-                meta: 'matview',
-                score: 1000,
-              })),
-              ...dbinfo.functions.map(x => ({
-                name: x.pureName,
-                value: x.pureName,
-                caption: x.pureName,
-                meta: 'function',
-                score: 1000,
-              })),
-              ...dbinfo.procedures.map(x => ({
-                name: x.pureName,
-                value: x.pureName,
-                caption: x.pureName,
-                meta: 'procedure',
-                score: 1000,
-              })),
+              ...createTableLikeList(schemaList, dbinfo, x => !defaultSchema || defaultSchema == x.schemaName),
+
               ...(onlyTables
                 ? []
                 : _.flatten(
                     sourceObjects.map(obj =>
-                      obj.columns.map(col => ({
+                      (obj.columns || []).map(col => ({
                         name: col.columnName,
                         value: obj.alias ? `${obj.alias}.${col.columnName}` : col.columnName,
                         caption: obj.alias ? `${obj.alias}.${col.columnName}` : col.columnName,

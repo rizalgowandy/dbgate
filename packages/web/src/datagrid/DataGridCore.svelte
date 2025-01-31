@@ -5,19 +5,31 @@
     id: 'dataGrid.refresh',
     category: 'Data grid',
     name: 'Refresh',
-    keyText: 'F5',
+    keyText: 'F5 | CtrlOrCommand+R',
     toolbar: true,
     isRelatedToTab: true,
     icon: 'icon reload',
-    testEnabled: () => getCurrentDataGrid()?.getDisplay()?.supportsReload,
+    testEnabled: () => getCurrentDataGrid()?.canRefresh(),
     onClick: () => getCurrentDataGrid().refresh(),
+  });
+
+  registerCommand({
+    id: 'dataGrid.deepRefresh',
+    category: 'Data grid',
+    name: 'Refresh with structure',
+    keyText: 'Ctrl+F5',
+    toolbar: true,
+    isRelatedToTab: true,
+    icon: 'icon reload',
+    testEnabled: () => getCurrentDataGrid()?.canDeepRefresh(),
+    onClick: () => getCurrentDataGrid().deepRefresh(),
   });
 
   registerCommand({
     id: 'dataGrid.revertRowChanges',
     category: 'Data grid',
     name: 'Revert row changes',
-    keyText: 'Ctrl+R',
+    keyText: 'CtrlOrCommand+U',
     testEnabled: () => getCurrentDataGrid()?.getGrider()?.containsChanges,
     onClick: () => getCurrentDataGrid().revertRowChanges(),
   });
@@ -26,6 +38,8 @@
     id: 'dataGrid.revertAllChanges',
     category: 'Data grid',
     name: 'Revert all changes',
+    toolbarName: 'Revert all',
+    icon: 'icon undo',
     testEnabled: () => getCurrentDataGrid()?.getGrider()?.containsChanges,
     onClick: () => getCurrentDataGrid().revertAllChanges(),
   });
@@ -34,7 +48,9 @@
     id: 'dataGrid.deleteSelectedRows',
     category: 'Data grid',
     name: 'Delete selected rows',
-    keyText: 'Ctrl+Delete',
+    toolbarName: 'Delete row(s)',
+    keyText: isMac() ? 'Command+Backspace' : 'CtrlOrCommand+Delete',
+    icon: 'icon minus',
     testEnabled: () => getCurrentDataGrid()?.getGrider()?.editable,
     onClick: () => getCurrentDataGrid().deleteSelectedRows(),
   });
@@ -43,18 +59,51 @@
     id: 'dataGrid.insertNewRow',
     category: 'Data grid',
     name: 'Insert new row',
-    keyText: 'Insert',
+    toolbarName: 'New row',
+    icon: 'icon add',
+    keyText: isMac() ? 'Command+I' : 'Insert',
     testEnabled: () => getCurrentDataGrid()?.getGrider()?.editable,
     onClick: () => getCurrentDataGrid().insertNewRow(),
+  });
+
+  registerCommand({
+    id: 'dataGrid.addNewColumn',
+    category: 'Data grid',
+    name: 'Add new column',
+    toolbarName: 'New column',
+    icon: 'icon add-column',
+    testEnabled: () => getCurrentDataGrid()?.addNewColumnEnabled(),
+    onClick: () => getCurrentDataGrid().addNewColumn(),
+  });
+
+  registerCommand({
+    id: 'dataGrid.cloneRows',
+    category: 'Data grid',
+    name: 'Clone rows',
+    toolbarName: 'Clone row(s)',
+    keyText: 'CtrlOrCommand+Shift+C',
+    testEnabled: () => getCurrentDataGrid()?.getGrider()?.editable,
+    onClick: () => getCurrentDataGrid().cloneRows(),
   });
 
   registerCommand({
     id: 'dataGrid.setNull',
     category: 'Data grid',
     name: 'Set NULL',
-    keyText: 'Ctrl+0',
-    testEnabled: () => getCurrentDataGrid()?.getGrider()?.editable,
+    keyText: 'CtrlOrCommand+0',
+    testEnabled: () =>
+      getCurrentDataGrid()?.getGrider()?.editable && !getCurrentDataGrid()?.getEditorTypes()?.supportFieldRemoval,
     onClick: () => getCurrentDataGrid().setFixedValue(null),
+  });
+
+  registerCommand({
+    id: 'dataGrid.removeField',
+    category: 'Data grid',
+    name: 'Remove field',
+    keyText: 'CtrlOrCommand+0',
+    testEnabled: () =>
+      getCurrentDataGrid()?.getGrider()?.editable && getCurrentDataGrid()?.getEditorTypes()?.supportFieldRemoval,
+    onClick: () => getCurrentDataGrid().setFixedValue(undefined),
   });
 
   registerCommand({
@@ -93,8 +142,8 @@
     id: 'dataGrid.copyToClipboard',
     category: 'Data grid',
     name: 'Copy to clipboard',
-    keyText: 'Ctrl+C',
-    disableHandleKeyText: 'Ctrl+C',
+    keyText: 'CtrlOrCommand+C',
+    disableHandleKeyText: 'CtrlOrCommand+C',
     testEnabled: () => getCurrentDataGrid() != null,
     onClick: () => getCurrentDataGrid().copyToClipboard(),
   });
@@ -102,10 +151,18 @@
   registerCommand({
     id: 'dataGrid.editJsonDocument',
     category: 'Data grid',
-    keyText: 'Ctrl+J',
+    keyText: 'CtrlOrCommand+J',
     name: 'Edit row as JSON document',
     testEnabled: () => getCurrentDataGrid()?.editJsonEnabled(),
     onClick: () => getCurrentDataGrid().editJsonDocument(),
+  });
+
+  registerCommand({
+    id: 'dataGrid.openSelectionInMap',
+    category: 'Data grid',
+    name: 'Open selection in map',
+    testEnabled: () => getCurrentDataGrid() != null, // ?.openSelectionInMapEnabled(),
+    onClick: () => getCurrentDataGrid().openSelectionInMap(),
   });
 
   registerCommand({
@@ -127,9 +184,25 @@
   registerCommand({
     id: 'dataGrid.openJsonArrayInSheet',
     category: 'Data grid',
-    name: 'Open array as data sheet',
+    name: 'Open array as table',
     testEnabled: () => getCurrentDataGrid()?.openJsonArrayInSheetEnabled(),
     onClick: () => getCurrentDataGrid().openJsonArrayInSheet(),
+  });
+
+  registerCommand({
+    id: 'dataGrid.saveCellToFile',
+    category: 'Data grid',
+    name: 'Save cell to file',
+    testEnabled: () => getCurrentDataGrid()?.saveCellToFileEnabled(),
+    onClick: () => getCurrentDataGrid().saveCellToFile(),
+  });
+
+  registerCommand({
+    id: 'dataGrid.loadCellFromFile',
+    category: 'Data grid',
+    name: 'Load cell from file',
+    testEnabled: () => getCurrentDataGrid()?.loadCellFromFileEnabled(),
+    onClick: () => getCurrentDataGrid().loadCellFromFile(),
   });
 
   // registerCommand({
@@ -144,7 +217,7 @@
     id: 'dataGrid.filterSelected',
     category: 'Data grid',
     name: 'Filter selected value',
-    keyText: 'Ctrl+Shift+F',
+    keyText: 'CtrlOrCommand+Shift+F',
     testEnabled: () => getCurrentDataGrid()?.getDisplay().filterable,
     onClick: () => getCurrentDataGrid().filterSelectedValue(),
   });
@@ -152,8 +225,8 @@
   registerCommand({
     id: 'dataGrid.findColumn',
     category: 'Data grid',
-    name: 'Find colunn',
-    keyText: 'Ctrl+F',
+    name: 'Find column',
+    keyText: 'CtrlOrCommand+F',
     testEnabled: () => getCurrentDataGrid() != null,
     getSubCommands: () => getCurrentDataGrid().buildFindMenu(),
   });
@@ -161,9 +234,9 @@
   registerCommand({
     id: 'dataGrid.hideColumn',
     category: 'Data grid',
-    name: 'Hide colunn',
-    keyText: 'Ctrl+H',
-    testEnabled: () => getCurrentDataGrid() != null,
+    name: 'Hide column',
+    keyText: isMac() ? 'Alt+Command+F' : 'CtrlOrCommand+H',
+    testEnabled: () => getCurrentDataGrid()?.canShowLeftPanel(),
     onClick: () => getCurrentDataGrid().hideColumn(),
   });
 
@@ -171,7 +244,7 @@
     id: 'dataGrid.clearFilter',
     category: 'Data grid',
     name: 'Clear filter',
-    keyText: 'Ctrl+I',
+    keyText: 'CtrlOrCommand+Shift+E',
     testEnabled: () => getCurrentDataGrid()?.clearFilterEnabled(),
     onClick: () => getCurrentDataGrid().clearFilter(),
   });
@@ -180,7 +253,7 @@
     id: 'dataGrid.generateSqlFromData',
     category: 'Data grid',
     name: 'Generate SQL',
-    keyText: 'Ctrl+G',
+    keyText: 'CtrlOrCommand+G',
     testEnabled: () => getCurrentDataGrid()?.generateSqlFromDataEnabled(),
     onClick: () => getCurrentDataGrid().generateSqlFromData(),
   });
@@ -188,7 +261,7 @@
   registerCommand({
     id: 'dataGrid.openFreeTable',
     category: 'Data grid',
-    name: 'Edit selection as data sheet',
+    name: 'Edit selection as table',
     testEnabled: () => getCurrentDataGrid() != null,
     onClick: () => getCurrentDataGrid().openFreeTable(),
   });
@@ -207,6 +280,62 @@
     name: 'Add JSON document',
     testEnabled: () => getCurrentDataGrid()?.addJsonDocumentEnabled(),
     onClick: () => getCurrentDataGrid().addJsonDocument(),
+  });
+
+  registerCommand({
+    id: 'dataGrid.editCellValue',
+    category: 'Data grid',
+    name: 'Edit cell value',
+    testEnabled: () => getCurrentDataGrid()?.editCellValueEnabled(),
+    onClick: () => getCurrentDataGrid().editCellValue(),
+  });
+
+  registerCommand({
+    id: 'dataGrid.mergeSelectedCellsIntoMirror',
+    category: 'Data grid',
+    name: 'Merge selected cells',
+    testEnabled: () => getCurrentDataGrid()?.mirrorWriteEnabled(true),
+    onClick: () => getCurrentDataGrid().mergeSelectionIntoMirror({ mergeMode: 'merge', fullRows: false }),
+  });
+
+  registerCommand({
+    id: 'dataGrid.mergeSelectedRowsIntoMirror',
+    category: 'Data grid',
+    name: 'Merge selected rows',
+    testEnabled: () => getCurrentDataGrid()?.mirrorWriteEnabled(true),
+    onClick: () => getCurrentDataGrid().mergeSelectionIntoMirror({ mergeMode: 'merge', fullRows: true }),
+  });
+
+  registerCommand({
+    id: 'dataGrid.appendSelectedCellsIntoMirror',
+    category: 'Data grid',
+    name: 'Append selected cells',
+    testEnabled: () => getCurrentDataGrid()?.mirrorWriteEnabled(true),
+    onClick: () => getCurrentDataGrid().mergeSelectionIntoMirror({ mergeMode: 'append', fullRows: false }),
+  });
+
+  registerCommand({
+    id: 'dataGrid.appendSelectedRowsIntoMirror',
+    category: 'Data grid',
+    name: 'Append selected rows',
+    testEnabled: () => getCurrentDataGrid()?.mirrorWriteEnabled(true),
+    onClick: () => getCurrentDataGrid().mergeSelectionIntoMirror({ mergeMode: 'append', fullRows: true }),
+  });
+
+  registerCommand({
+    id: 'dataGrid.replaceSelectedCellsIntoMirror',
+    category: 'Data grid',
+    name: 'Replace with selected cells',
+    testEnabled: () => getCurrentDataGrid()?.mirrorWriteEnabled(true),
+    onClick: () => getCurrentDataGrid().mergeSelectionIntoMirror({ mergeMode: 'replace', fullRows: false }),
+  });
+
+  registerCommand({
+    id: 'dataGrid.replaceSelectedRowsIntoMirror',
+    category: 'Data grid',
+    name: 'Replace with selected rows',
+    testEnabled: () => getCurrentDataGrid()?.mirrorWriteEnabled(true),
+    onClick: () => getCurrentDataGrid().mergeSelectionIntoMirror({ mergeMode: 'replace', fullRows: true }),
   });
 
   function getSelectedCellsInfo(selectedCells, grider, realColumnUniqueNames, selectedRowData) {
@@ -235,13 +364,19 @@
 
 <script lang="ts">
   import { GridDisplay } from 'dbgate-datalib';
-  import { driverBase } from 'dbgate-tools';
-  import { getContext } from 'svelte';
-  import _ from 'lodash';
+  import {
+    driverBase,
+    parseCellValue,
+    detectSqlFilterBehaviour,
+    stringifyCellValue,
+    shouldOpenMultilineDialog,
+  } from 'dbgate-tools';
+  import { getContext, onDestroy } from 'svelte';
+  import _, { map } from 'lodash';
   import registerCommand from '../commands/registerCommand';
   import ColumnHeaderControl from './ColumnHeaderControl.svelte';
   import DataGridRow from './DataGridRow.svelte';
-  import { getFilterType, getFilterValueExpression } from 'dbgate-filterparser';
+  import { getFilterValueExpression } from 'dbgate-filterparser';
   import stableStringify from 'json-stable-stringify';
   import contextMenu, { getContextMenu, registerMenu } from '../utility/contextMenu';
   import { tick } from 'svelte';
@@ -256,13 +391,12 @@
   import { cellFromEvent, emptyCellArray, getCellRange, isRegularCell, nullCell, topLeftCell } from './selection';
   import VerticalScrollBar from './VerticalScrollBar.svelte';
   import LoadingInfo from '../elements/LoadingInfo.svelte';
-  import InlineButton from '../elements/InlineButton.svelte';
+  import InlineButton from '../buttons/InlineButton.svelte';
   import FontIcon from '../icons/FontIcon.svelte';
   import DataFilterControl from './DataFilterControl.svelte';
   import createReducer from '../utility/createReducer';
   import keycodes from '../utility/keycodes';
-  import { copyRowsFormat, selectedCellsCallback } from '../stores';
-  import axiosInstance from '../utility/axiosInstance';
+  import { copyRowsFormat, currentArchive, selectedCellsCallback } from '../stores';
   import {
     copyRowsFormatDefs,
     copyRowsToClipboard,
@@ -275,8 +409,8 @@
   import openNewTab from '../utility/openNewTab';
   import ErrorInfo from '../elements/ErrorInfo.svelte';
   import { dataGridRowHeight } from './DataGridRowHeightMeter.svelte';
-  import FormStyledButton from '../elements/FormStyledButton.svelte';
-  import { editJsonRowDocument } from '../jsonview/CollectionJsonRow.svelte';
+  import FormStyledButton from '../buttons/FormStyledButton.svelte';
+  import { editJsonRowDocument } from '../formview/CollectionJsonRow.svelte';
   import createActivator, { getActiveComponent } from '../utility/createActivator';
   import CollapseButton from './CollapseButton.svelte';
   import GenerateSqlFromDataModal from '../modals/GenerateSqlFromDataModal.svelte';
@@ -285,6 +419,17 @@
   import { findCommand } from '../commands/runCommand';
   import { openJsonDocument } from '../tabs/JsonTab.svelte';
   import EditJsonModal from '../modals/EditJsonModal.svelte';
+  import { apiCall } from '../utility/api';
+  import getElectron from '../utility/getElectron';
+  import { isCtrlOrCommandKey, isMac } from '../utility/common';
+  import { createGeoJsonFromSelection, selectionCouldBeShownOnMap } from '../elements/SelectionMapView.svelte';
+  import ErrorMessageModal from '../modals/ErrorMessageModal.svelte';
+  import EditCellDataModal from '../modals/EditCellDataModal.svelte';
+  import { getDatabaseInfo, useDatabaseStatus, useSettings } from '../utility/metadataLoaders';
+  import { showSnackbarSuccess } from '../utility/snackbar';
+  import { openJsonLinesData } from '../utility/openJsonLinesData';
+  import contextMenuActivator from '../utility/contextMenuActivator';
+  import InputTextModal from '../modals/InputTextModal.svelte';
 
   export let onLoadNextData = undefined;
   export let grider = undefined;
@@ -295,28 +440,38 @@
   export let isLoading = false;
   export let allRowCount = undefined;
   export let onReferenceSourceChanged = undefined;
+  export let onPublishedCellsChanged = undefined;
   export let onReferenceClick = undefined;
+  export let onChangeSelectedColumns = undefined;
   // export let onSelectedCellsPublishedChanged = undefined;
   export let focusOnVisible = false;
   export let formViewAvailable = false;
   export let errorMessage = undefined;
   export let pureName = undefined;
   export let schemaName = undefined;
+  export let allowDefineVirtualReferences = false;
+  export let formatterFunction;
 
   export let isLoadedAll;
   export let loadedTime;
   export let changeSetStore;
   export let isDynamicStructure = false;
-  export let selectedCellsPublished = () => [];
+  // export let selectedCellsPublished = () => [];
   export let collapsedLeftColumnStore;
   export let multipleGridsOnTab = false;
   export let tabControlHiddenTab = false;
+  export let onCustomGridRefresh = null;
+  export let onOpenQuery = null;
+  export let jslid;
   // export let generalAllowSave = false;
+  export let hideGridLeftColumn = false;
 
   export const activator = createActivator('DataGridCore', false);
 
+  export let dataEditorTypesBehaviourOverride = null;
+
   const wheelRowCount = 5;
-  const tabVisible: any = getContext('tabVisible');
+  const tabFocused: any = getContext('tabFocused');
 
   let containerHeight = 0;
   let containerWidth = 0;
@@ -327,6 +482,7 @@
   let domFocusField;
   let domHorizontalScroll;
   let domVerticalScroll;
+  let domContainer;
 
   let currentCell = topLeftCell;
   let selectedCells = [topLeftCell];
@@ -336,10 +492,52 @@
   let autofillSelectedCells = emptyCellArray;
   const domFilterControlsRef = createRef({});
 
+  let isGridFocused = false;
+
   const tabid = getContext('tabid');
 
+  let unsubscribeDbRefresh;
+
+  onDestroy(callUnsubscribeDbRefresh);
+
+  function callUnsubscribeDbRefresh() {
+    if (unsubscribeDbRefresh) {
+      unsubscribeDbRefresh();
+      unsubscribeDbRefresh = null;
+    }
+  }
+
+  async function refreshAndUnsubscribe(status) {
+    if (status?.name != 'pending' && status?.name != 'checkStructure' && status?.name != 'loadStructure') {
+      callUnsubscribeDbRefresh();
+      // ensure new structure is loaded
+      await getDatabaseInfo({ conid, database });
+      refresh();
+    }
+  }
+
+  const settingsValue = useSettings();
+
+  $: gridColoringMode = $settingsValue?.['dataGrid.coloringMode'];
+
   export function refresh() {
-    display.reload();
+    if (onCustomGridRefresh) onCustomGridRefresh();
+    else display.reload();
+  }
+
+  export function canRefresh() {
+    if (onCustomGridRefresh) return true;
+    return getDisplay()?.supportsReload;
+  }
+
+  export function canDeepRefresh() {
+    return canRefresh() && !!conid && !!database;
+  }
+
+  export async function deepRefresh() {
+    callUnsubscribeDbRefresh();
+    await apiCall('database-connections/sync-model', { conid, database });
+    unsubscribeDbRefresh = useDatabaseStatus({ conid, database }).subscribe(refreshAndUnsubscribe);
   }
 
   export function getGrider() {
@@ -368,23 +566,71 @@
 
   export function deleteSelectedRows() {
     grider.beginUpdate();
-    for (const index of getSelectedRowIndexes()) {
+    for (const index of _.sortBy(getSelectedRowIndexes(), x => -x)) {
       if (_.isNumber(index)) grider.deleteRow(index);
     }
     grider.endUpdate();
   }
 
+  export function addNewColumnEnabled() {
+    return getGrider()?.editable && isDynamicStructure;
+  }
+
+  export function addNewColumn() {
+    showModal(InputTextModal, {
+      value: '',
+      label: 'Column name',
+      header: 'Add new column',
+      onConfirm: name => {
+        display.addDynamicColumn(name);
+        tick().then(() => {
+          display.focusColumns([name]);
+        });
+      },
+    });
+  }
+
   export async function insertNewRow() {
-    if (grider.canInsert) {
-      const rowIndex = grider.insertRow();
-      const cell = [rowIndex, (currentCell && currentCell[1]) || 0];
-      // @ts-ignore
-      currentCell = cell;
-      // @ts-ignore
-      selectedCells = [cell];
-      await tick();
-      scrollIntoView(cell);
+    if (!grider.canInsert) return;
+    const rowIndex = grider.insertRow();
+    const cell = [rowIndex, (currentCell && currentCell[1]) || 0];
+    // @ts-ignore
+    currentCell = cell;
+    // @ts-ignore
+    selectedCells = [cell];
+    await tick();
+    scrollIntoView(cell);
+    domFocusField?.focus();
+  }
+
+  export async function cloneRows() {
+    if (!grider.canInsert) return;
+
+    let rowIndex = null;
+    grider.beginUpdate();
+    for (const index of _.sortBy(getSelectedRowIndexes(), x => x)) {
+      if (_.isNumber(index)) {
+        rowIndex = grider.insertRow();
+
+        for (const column of display.columns) {
+          if (column.uniquePath.length > 1) continue;
+          if (column.autoIncrement) continue;
+          if (column.isClusterKey) continue;
+
+          grider.setCellValue(rowIndex, column.uniqueName, grider.getRowData(index)[column.uniqueName]);
+        }
+      }
     }
+    grider.endUpdate();
+
+    if (rowIndex == null) return;
+    const cell = [rowIndex, (currentCell && currentCell[1]) || 0];
+    // @ts-ignore
+    currentCell = cell;
+    // @ts-ignore
+    selectedCells = [cell];
+    await tick();
+    scrollIntoView(cell);
   }
 
   export function setFixedValue(value) {
@@ -404,7 +650,7 @@
   }
 
   export async function reconnect() {
-    await axiosInstance.post('database-connections/refresh', { conid, database });
+    await apiCall('database-connections/refresh', { conid, database });
     display.reload();
   }
 
@@ -460,15 +706,7 @@
   }
 
   export function openFreeTable() {
-    openNewTab(
-      {
-        title: 'Data #',
-        icon: 'img free-table',
-        tabComponent: 'FreeTableTab',
-        props: {},
-      },
-      { editor: getSelectedFreeData() }
-    );
+    openJsonLinesData(getSelectedFreeDataRows());
   }
 
   export function openChartFromSelection() {
@@ -498,6 +736,88 @@
     openJsonDocument(json);
   }
 
+  export function openSelectionInMap() {
+    const selection = getCellsPublished(selectedCells);
+    if (!selectionCouldBeShownOnMap(selection)) {
+      showModal(ErrorMessageModal, { message: 'There is nothing to be shown on map' });
+      return;
+    }
+
+    const geoJson = createGeoJsonFromSelection(selection);
+    if (!geoJson) {
+      showModal(ErrorMessageModal, { message: 'There is nothing to be shown on map' });
+      return;
+    }
+
+    openNewTab(
+      {
+        title: 'Map',
+        icon: 'img map',
+        tabComponent: 'MapTab',
+      },
+      { editor: geoJson }
+    );
+    return;
+  }
+
+  function getSelectedExportableCell() {
+    const electron = getElectron();
+    if (electron && selectedCells.length == 1) {
+      const cell = selectedCells[0];
+      const rowData = grider.getRowData(cell[0]);
+      if (!rowData) return null;
+      const cellData = rowData[realColumnUniqueNames[cell[1]]];
+      return cellData;
+    }
+  }
+
+  export function saveCellToFileEnabled() {
+    const value = getSelectedExportableCell();
+    return _.isString(value) || (value?.type == 'Buffer' && _.isArray(value?.data));
+  }
+
+  export async function saveCellToFile() {
+    const electron = getElectron();
+    const file = await electron.showSaveDialog({});
+    if (file) {
+      const fs = window.require('fs');
+      const value = getSelectedExportableCell();
+      if (_.isString(value)) {
+        fs.promises.writeFile(file, value);
+      } else if (value?.type == 'Buffer' && _.isArray(value?.data)) {
+        fs.promises.writeFile(file, window['Buffer'].from(value.data));
+      }
+    }
+  }
+
+  export function loadCellFromFileEnabled() {
+    const electron = getElectron();
+    return electron && selectedCells.length == 1 && isRegularCell(selectedCells[0]);
+  }
+
+  export async function loadCellFromFile() {
+    const electron = getElectron();
+    const files = await electron.showOpenDialog({
+      properties: ['showHiddenFiles', 'openFile'],
+      filters: [{ name: 'All Files', extensions: ['*'] }],
+    });
+    const file = files && files[0];
+    if (file) {
+      const fs = window.require('fs');
+      const isText = file.endsWith('.json') || file.endsWith('.txt') || file.endsWith('.html') || file.endsWith('.xml');
+      const data = await fs.promises.readFile(file, isText ? { encoding: 'utf-8' } : null);
+      setCellValue(
+        selectedCells[0],
+        isText
+          ? data
+          : {
+              type: 'Buffer',
+              data: [...data],
+            }
+      );
+    }
+  }
+
   function getSelectedDataJson(forceArray = false) {
     const cells = cellsToRegularCells(selectedCells);
     const data = cells.map(cell => {
@@ -524,20 +844,7 @@
   }
 
   export function openJsonArrayInSheet() {
-    openNewTab(
-      {
-        title: 'Data #',
-        icon: 'img free-table',
-        tabComponent: 'FreeTableTab',
-        props: {},
-      },
-      {
-        editor: {
-          rows: getSelectedDataJson(true),
-          structure: { __isDynamicStructure: true, columns: [] },
-        },
-      }
-    );
+    openJsonLinesData(getSelectedDataJson(true));
   }
 
   export function editJsonEnabled() {
@@ -547,6 +854,27 @@
   export function editJsonDocument() {
     const rowIndex = selectedCells[0][0];
     editJsonRowDocument(grider, rowIndex);
+  }
+
+  export function editCellValueEnabled() {
+    return grider.editable && selectedCells.length == 1;
+  }
+
+  export function editCellValue() {
+    if (!currentCell) return false;
+    const rowData = grider.getRowData(currentCell[0]);
+    if (!rowData) return null;
+    const cellData = rowData[realColumnUniqueNames[currentCell[1]]];
+
+    showModal(EditCellDataModal, {
+      value: cellData,
+      dataEditorTypesBehaviour: getEditorTypes(),
+      onSave: value => grider.setCellValue(currentCell[0], realColumnUniqueNames[currentCell[1]], value),
+    });
+  }
+
+  export function getEditorTypes() {
+    return dataEditorTypesBehaviourOverride ?? display?.driver?.dataEditorTypesBehaviour;
   }
 
   export function addJsonDocumentEnabled() {
@@ -672,7 +1000,7 @@
 
   export function generateSqlFromData() {
     const columnIndexes = _.uniq(selectedCells.map(x => x[1]));
-    columnIndexes.sort();
+    columnIndexes.sort((a, b) => a - b);
 
     showModal(GenerateSqlFromDataModal, {
       rows: getSelectedRowData(),
@@ -684,6 +1012,40 @@
       engineDriver: display?.driver,
       tableInfo: display.baseTable,
     });
+  }
+
+  export function mirrorWriteEnabled(requireKey) {
+    return requireKey ? !!display.baseTable?.primaryKey || !!display.baseCollection : !!display.baseTableOrSimilar;
+  }
+
+  export async function mergeSelectionIntoMirror({ fullRows, mergeMode = 'merge' }) {
+    const file = display.baseTableOrSimilar?.pureName;
+    const mergeKey = display.baseCollection
+      ? display.baseCollection?.uniqueKey?.map(x => x.columnName)
+      : display.baseTable?.primaryKey.columns.map(x => x.columnName);
+
+    const cells = cellsToRegularCells(selectedCells);
+    const rowIndexes = _.sortBy(_.uniq(cells.map(x => x[0])));
+    const colIndexes = _.sortBy(_.uniq(cells.map(x => x[1])));
+    const rows = rowIndexes.map(rowIndex => grider.getRowData(rowIndex));
+    // @ts-ignore
+    const columns = colIndexes.map(col => realColumnUniqueNames[col]);
+    const mergedRows = fullRows ? rows : rows.map(x => _.pick(x, _.uniq([...columns, ...mergeKey])));
+
+    const res = await apiCall('archive/modify-file', {
+      folder: $currentArchive,
+      file,
+      mergedRows,
+      mergeKey,
+      mergeMode,
+    });
+    if (res) {
+      showSnackbarSuccess(`Merged ${mergedRows.length} rows into ${file} in archive ${$currentArchive}`);
+    }
+  }
+
+  export function canShowLeftPanel() {
+    return !hideGridLeftColumn;
   }
 
   $: autofillMarkerCell =
@@ -716,12 +1078,15 @@
 
   $: selectedCellsInfo = getSelectedCellsInfo(selectedCells, grider, realColumnUniqueNames, getSelectedRowData());
 
+  $: databaseStatus = useDatabaseStatus({ conid, database });
+
   // $: console.log('visibleRealColumns', visibleRealColumns);
   // $: console.log('visibleRowCountUpperBound', visibleRowCountUpperBound);
   // $: console.log('rowHeight', rowHeight);
   // $: console.log('containerHeight', containerHeight);
 
   // $: console.log('COLUMNS', columns);
+  // $: console.log('columnSizes.realCount', columnSizes.realCount);
   // $: console.log('realColumnUniqueNames', realColumnUniqueNames);
   // $: console.log('columnSizes.realCount', columnSizes.realCount);
 
@@ -739,9 +1104,9 @@
 
   $: {
     tick().then(() => {
-      if (display && display.focusedColumn) {
+      if (display?.focusedColumns?.length > 0) {
         const invMap = _.invert(realColumnUniqueNames);
-        const colIndex = invMap[display.focusedColumn];
+        const colIndex = invMap[display.focusedColumns[0]];
         if (colIndex) {
           scrollIntoView([null, colIndex]);
         }
@@ -775,19 +1140,34 @@
     }
   }
 
-  $: if ($tabVisible && domFocusField && focusOnVisible) {
+  $: if ($tabFocused && domFocusField && focusOnVisible) {
     domFocusField.focus();
   }
 
   const lastPublishledSelectedCellsRef = createRef('');
+  const changeSetValueRef = createRef(null);
   $: {
     const stringified = stableStringify(selectedCells);
-    if (lastPublishledSelectedCellsRef.get() != stringified) {
-      lastPublishledSelectedCellsRef.set(stringified);
-      const cellsValue = () => getCellsPublished(selectedCells);
-      selectedCellsPublished = cellsValue;
-      $selectedCellsCallback = cellsValue;
-      // if (onSelectedCellsPublishedChanged) onSelectedCellsPublishedChanged(getCellsPublished(selectedCells));
+    if (
+      (lastPublishledSelectedCellsRef.get() != stringified || changeSetValueRef.get() != $changeSetStore?.value) &&
+      realColumnUniqueNames?.length > 0
+    ) {
+      tick().then(() => {
+        const rowIndexes = _.uniq(selectedCells.map(x => x[0]));
+        if (rowIndexes.every(x => grider.getRowData(x))) {
+          lastPublishledSelectedCellsRef.set(stringified);
+          changeSetValueRef.set($changeSetStore?.value);
+          $selectedCellsCallback = () => getCellsPublished(selectedCells);
+
+          if (onChangeSelectedColumns) {
+            onChangeSelectedColumns(getSelectedColumns().map(x => x.columnName));
+          }
+
+          if (onPublishedCellsChanged) {
+            onPublishedCellsChanged(getCellsPublished(selectedCells));
+          }
+        }
+      });
     }
   }
 
@@ -800,6 +1180,12 @@
       },
       rows,
     };
+  };
+
+  const getSelectedFreeDataRows = () => {
+    const columns = getSelectedColumns();
+    const rows = getSelectedRowData().map(row => _.pickBy(row, (v, col) => columns.find(x => x.columnName == col)));
+    return rows;
   };
 
   function getCellsPublished(cells) {
@@ -815,6 +1201,8 @@
           column,
           value: rowData && rowData[column],
           engine: display?.driver,
+          condition: display?.getChangeSetCondition(rowData),
+          insertedRowIndex: grider?.getInsertedRowIndex(row),
         };
       })
       .filter(x => x.column);
@@ -861,6 +1249,7 @@
     if (event.target.closest('.resizeHandleControl')) return;
     if (event.target.closest('.collapseButtonMarker')) return;
     if (event.target.closest('.showFormButtonMarker')) return;
+    if (event.target.closest('.inplaceeditor-container')) return;
     if (event.target.closest('input')) return;
 
     shiftDragStartCell = null;
@@ -883,7 +1272,7 @@
       const oldCurrentCell = currentCell;
       currentCell = cell;
 
-      if (event.ctrlKey) {
+      if (isCtrlOrCommandKey(event)) {
         if (isRegularCell(cell)) {
           if (selectedCells.find(x => x[0] == cell[0] && x[1] == cell[1])) {
             selectedCells = selectedCells.filter(x => x[0] != cell[0] || x[1] != cell[1]);
@@ -898,14 +1287,37 @@
         dragStartCell = cell;
 
         if (isRegularCell(cell) && !_.isEqual(cell, $inplaceEditorState.cell) && _.isEqual(cell, oldCurrentCell)) {
-          dispatchInsplaceEditor({ type: 'show', cell, selectAll: true });
+          if (!showMultilineCellEditorConditional(cell)) {
+            dispatchInsplaceEditor({ type: 'show', cell, selectAll: true });
+          }
         } else if (!_.isEqual(cell, $inplaceEditorState.cell)) {
           dispatchInsplaceEditor({ type: 'close' });
         }
       }
     }
 
-    if (display.focusedColumn) display.focusColumn(null);
+    if (display.focusedColumns) display.focusColumns(null);
+  }
+
+  function handleBlur() {
+    shiftDragStartCell = null;
+    dragStartCell = null;
+  }
+
+  function showMultilineCellEditorConditional(cell) {
+    if (!cell) return false;
+    const rowData = grider.getRowData(cell[0]);
+    if (!rowData) return null;
+    const cellData = rowData[realColumnUniqueNames[cell[1]]];
+    if (shouldOpenMultilineDialog(cellData)) {
+      showModal(EditCellDataModal, {
+        dataEditorTypesBehaviour: getEditorTypes(),
+        value: cellData,
+        onSave: value => grider.setCellValue(cell[0], realColumnUniqueNames[cell[1]], value),
+      });
+      return true;
+    }
+    return false;
   }
 
   function handleGridMouseMove(event) {
@@ -1023,6 +1435,7 @@
     if (
       !event.ctrlKey &&
       !event.altKey &&
+      !event.metaKey &&
       ((event.keyCode >= keycodes.a && event.keyCode <= keycodes.z) ||
         (event.keyCode >= keycodes.n0 && event.keyCode <= keycodes.n9) ||
         (event.keyCode >= keycodes.numPad0 && event.keyCode <= keycodes.numPad9) ||
@@ -1034,9 +1447,11 @@
       // console.log('event', event.nativeEvent);
     }
 
-    if (event.keyCode == keycodes.f2) {
+    if (event.keyCode == keycodes.f2 || event.keyCode == keycodes.enter) {
       // @ts-ignore
-      dispatchInsplaceEditor({ type: 'show', cell: currentCell, selectAll: true });
+      if (!showMultilineCellEditorConditional(currentCell)) {
+        dispatchInsplaceEditor({ type: 'show', cell: currentCell, selectAll: true });
+      }
     }
 
     if (event.shiftKey) {
@@ -1049,7 +1464,20 @@
 
     handleCursorMove(event);
 
-    if (event.shiftKey && event.keyCode != keycodes.shift) {
+    if (
+      event.shiftKey &&
+      event.keyCode != keycodes.shift &&
+      event.keyCode != keycodes.tab &&
+      event.keyCode != keycodes.ctrl &&
+      event.keyCode != keycodes.leftWindowKey &&
+      event.keyCode != keycodes.rightWindowKey &&
+      !(
+        (event.keyCode >= keycodes.a && event.keyCode <= keycodes.z) ||
+        (event.keyCode >= keycodes.n0 && event.keyCode <= keycodes.n9) ||
+        (event.keyCode >= keycodes.numPad0 && event.keyCode <= keycodes.numPad9) ||
+        event.keyCode == keycodes.dash
+      )
+    ) {
       selectedCells = getCellRange(shiftDragStartCell || currentCell, currentCell);
     }
   }
@@ -1057,7 +1485,7 @@
   function handleCursorMove(event) {
     if (!isRegularCell(currentCell)) return null;
     let rowCount = grider.rowCount;
-    if (event.ctrlKey) {
+    if (isCtrlOrCommandKey(event)) {
       switch (event.keyCode) {
         case keycodes.upArrow:
         case keycodes.pageUp:
@@ -1084,8 +1512,10 @@
           if (currentCell[0] == 0) return focusFilterEditor(currentCell[1]);
           return moveCurrentCell(currentCell[0] - 1, currentCell[1], event);
         case keycodes.downArrow:
-        case keycodes.enter:
           return moveCurrentCell(currentCell[0] + 1, currentCell[1], event);
+        case keycodes.enter:
+          if (!grider.editable) return moveCurrentCell(currentCell[0] + 1, currentCell[1], event);
+          break;
         case keycodes.leftArrow:
           return moveCurrentCell(currentCell[0], currentCell[1] - 1, event);
         case keycodes.rightArrow:
@@ -1098,9 +1528,30 @@
           return moveCurrentCell(currentCell[0] - visibleRowCountLowerBound, currentCell[1], event);
         case keycodes.pageDown:
           return moveCurrentCell(currentCell[0] + visibleRowCountLowerBound, currentCell[1], event);
+        case keycodes.tab: {
+          return moveCurrentCellWithTabKey(event.shiftKey);
+        }
       }
     }
     return null;
+  }
+
+  function moveCurrentCellWithTabKey(isShift) {
+    if (!isRegularCell(currentCell)) return null;
+
+    if (isShift) {
+      if (currentCell[1] > 0) {
+        return moveCurrentCell(currentCell[0], currentCell[1] - 1, event);
+      } else {
+        return moveCurrentCell(currentCell[0] - 1, columnSizes.realCount - 1, event);
+      }
+    } else {
+      if (currentCell[1] < columnSizes.realCount - 1) {
+        return moveCurrentCell(currentCell[0], currentCell[1] + 1, event);
+      } else {
+        return moveCurrentCell(currentCell[0] + 1, 0, event);
+      }
+    }
   }
 
   function setCellValue(cell, value) {
@@ -1172,7 +1623,7 @@
           }
           let colIndex = startCol;
           for (const cell of rowData) {
-            setCellValue([rowIndex, colIndex], cell == '(NULL)' ? null : cell);
+            setCellValue([rowIndex, colIndex], parseCellValue(cell, getEditorTypes()));
             colIndex += 1;
           }
           rowIndex += 1;
@@ -1243,10 +1694,24 @@
           selectAll: action.selectAll,
         };
       case 'close': {
-        const [row, col] = currentCell || [];
         if (domFocusField) domFocusField.focus();
-        // @ts-ignore
-        if (action.mode == 'enter' && row) setTimeout(() => moveCurrentCell(row + 1, col), 0);
+        if (action.mode == 'enter' || action.mode == 'tab' || action.mode == 'shiftTab') {
+          setTimeout(() => {
+            if (isRegularCell(currentCell)) {
+              switch (action.mode) {
+                case 'enter':
+                  moveCurrentCell(currentCell[0] + 1, currentCell[1]);
+                  break;
+                case 'tab':
+                  moveCurrentCellWithTabKey(false);
+                  break;
+                case 'shiftTab':
+                  moveCurrentCellWithTabKey(true);
+                  break;
+              }
+            }
+          }, 0);
+        }
         // if (action.mode == 'save') setTimeout(handleSave, 0);
         return {};
       }
@@ -1295,26 +1760,45 @@
     { command: 'dataGrid.revertAllChanges', hideDisabled: true },
     { command: 'dataGrid.deleteSelectedRows' },
     { command: 'dataGrid.insertNewRow' },
-    { command: 'dataGrid.setNull' },
+    { command: 'dataGrid.cloneRows' },
+    { command: 'dataGrid.setNull', hideDisabled: true },
+    { command: 'dataGrid.removeField', hideDisabled: true },
     { placeTag: 'edit' },
     { divider: true },
     { command: 'dataGrid.findColumn' },
-    { command: 'dataGrid.hideColumn' },
+    { command: 'dataGrid.hideColumn', hideDisabled: true },
     { command: 'dataGrid.filterSelected' },
     { command: 'dataGrid.clearFilter' },
+    { command: 'dataGrid.addNewColumn', hideDisabled: true },
     { command: 'dataGrid.undo', hideDisabled: true },
     { command: 'dataGrid.redo', hideDisabled: true },
+    { divider: true },
+    { command: 'dataGrid.editCellValue', hideDisabled: true },
     { command: 'dataGrid.newJson', hideDisabled: true },
     { command: 'dataGrid.editJsonDocument', hideDisabled: true },
     { command: 'dataGrid.viewJsonDocument', hideDisabled: true },
     { command: 'dataGrid.viewJsonValue', hideDisabled: true },
     { command: 'dataGrid.openJsonArrayInSheet', hideDisabled: true },
+    { command: 'dataGrid.saveCellToFile', hideDisabled: true },
+    { command: 'dataGrid.loadCellFromFile', hideDisabled: true },
     // { command: 'dataGrid.copyJsonDocument', hideDisabled: true },
     { divider: true },
     { placeTag: 'export' },
+    {
+      label: 'Save to current archive',
+      submenu: [
+        { command: 'dataGrid.mergeSelectedCellsIntoMirror' },
+        { command: 'dataGrid.mergeSelectedRowsIntoMirror' },
+        { command: 'dataGrid.appendSelectedCellsIntoMirror' },
+        { command: 'dataGrid.appendSelectedRowsIntoMirror' },
+        { command: 'dataGrid.replaceSelectedCellsIntoMirror' },
+        { command: 'dataGrid.replaceSelectedRowsIntoMirror' },
+      ],
+    },
     { command: 'dataGrid.generateSqlFromData' },
     { command: 'dataGrid.openFreeTable' },
     { command: 'dataGrid.openChartFromSelection' },
+    { command: 'dataGrid.openSelectionInMap', hideDisabled: true },
     { placeTag: 'chart' }
   );
 
@@ -1326,7 +1810,7 @@
       {
         text: copyRowsFormatDefs[$copyRowsFormat].label,
         onClick: () => copyToClipboardCore($copyRowsFormat),
-        keyText: 'Ctrl+C',
+        keyText: 'CtrlOrCommand+C',
         tag: 'copy',
       },
     ];
@@ -1344,19 +1828,37 @@
 </script>
 
 {#if !display || (!isDynamicStructure && (!columns || columns.length == 0))}
-  <LoadingInfo wrapper message="Waiting for structure" />
+  {#if $databaseStatus?.name == 'pending' || $databaseStatus?.name == 'checkStructure' || $databaseStatus?.name == 'loadStructure'}
+    <LoadingInfo wrapper message="Waiting for structure" />
+  {:else}
+    <ErrorInfo alignTop message="No structure was loaded, probably table doesn't exist in current database" />
+  {/if}
 {:else if errorMessage}
-  <ErrorInfo message={errorMessage} alignTop />
-{:else if isDynamicStructure && isLoadedAll && grider?.rowCount == 0}
   <div>
+    <ErrorInfo message={errorMessage} alignTop />
+    <FormStyledButton value="Reset filter" on:click={() => display.clearFilters()} />
+    <FormStyledButton value="Reset view" on:click={() => display.resetConfig()} />
+    {#if onOpenQuery}
+      <FormStyledButton value="Open Query" on:click={onOpenQuery} />
+    {/if}
+  </div>
+{:else if isDynamicStructure && isLoadedAll && grider?.rowCount == 0}
+  <div class="ml-2">
     <ErrorInfo
       alignTop
-      message="No rows loaded, check filter or add new documents. You could copy documents from ohter collections/tables with Copy advanved/Copy as JSON command."
+      message={grider.editable
+        ? 'No rows loaded, check filter or add new documents. You could copy documents from other collections/tables with Copy advanved/Copy as JSON command.'
+        : 'No rows loaded'}
     />
     {#if display.filterCount > 0}
       <FormStyledButton value="Reset filter" on:click={() => display.clearFilters()} />
     {/if}
-    <FormStyledButton value="Add document" on:click={addJsonDocument} />
+    {#if grider.editable}
+      <FormStyledButton value="Add document" on:click={addJsonDocument} />
+    {/if}
+    {#if onOpenQuery}
+      <FormStyledButton value="Open Query" on:click={onOpenQuery} />
+    {/if}
   </div>
 {:else if grider.errors && grider.errors.length > 0}
   <div>
@@ -1367,10 +1869,18 @@
 {:else}
   <div
     class="container"
+    class:data-grid-focused={isGridFocused}
     bind:clientWidth={containerWidth}
     bind:clientHeight={containerHeight}
+    bind:this={domContainer}
     use:contextMenu={buildMenu}
+    use:contextMenuActivator={activator}
     on:wheel={handleGridWheel}
+    on:click={e => {
+      if (e.target == domContainer) {
+        domFocusField?.focus();
+      }
+    }}
   >
     <input
       type="text"
@@ -1380,9 +1890,14 @@
       on:focus={() => {
         activator.activate();
         invalidateCommands();
+        isGridFocused = true;
       }}
+      on:blur
       on:paste={handlePaste}
       on:copy={copyToClipboard}
+      on:blur={() => {
+        isGridFocused = false;
+      }}
     />
     <table
       class="table"
@@ -1398,10 +1913,12 @@
             data-col="header"
             style={`width:${headerColWidth}px; min-width:${headerColWidth}px; max-width:${headerColWidth}px`}
           >
-            <CollapseButton
-              collapsed={$collapsedLeftColumnStore}
-              on:click={() => collapsedLeftColumnStore.update(x => !x)}
-            />
+            {#if !hideGridLeftColumn}
+              <CollapseButton
+                collapsed={$collapsedLeftColumnStore}
+                on:click={() => collapsedLeftColumnStore.update(x => !x)}
+              />
+            {/if}
           </td>
           {#each visibleRealColumns as col (col.uniqueName)}
             <td
@@ -1415,13 +1932,18 @@
                 {conid}
                 {database}
                 setSort={display.sortable ? order => display.setSort(col.uniqueName, order) : null}
-                order={display.getSortOrder(col.uniqueName)}
+                addToSort={display.sortable ? order => display.addToSort(col.uniqueName, order) : null}
+                order={display.sortable ? display.getSortOrder(col.uniqueName) : null}
+                orderIndex={display.sortable ? display.getSortOrderIndex(col.uniqueName) : -1}
+                isSortDefined={display.sortable ? display.isSortDefined() : false}
+                clearSort={display.sortable ? () => display.clearSort() : null}
                 on:resizeSplitter={e => {
                   // @ts-ignore
                   display.resizeColumn(col.uniqueName, col.width, e.detail);
                 }}
                 setGrouping={display.groupable ? groupFunc => display.setGrouping(col.uniqueName, groupFunc) : null}
                 grouping={display.getGrouping(col.uniqueName)}
+                {allowDefineVirtualReferences}
               />
             </td>
           {/each}
@@ -1451,12 +1973,17 @@
                   onGetReference={value => (domFilterControlsRef.get()[col.uniqueName] = value)}
                   foreignKey={col.foreignKey}
                   columnName={col.uniquePath.length == 1 ? col.uniquePath[0] : null}
+                  uniqueName={col.uniqueName}
                   pureName={col.pureName}
                   schemaName={col.schemaName}
                   {conid}
                   {database}
+                  {jslid}
+                  {formatterFunction}
                   driver={display?.driver}
-                  filterType={col.filterType || getFilterType(col.dataType)}
+                  filterBehaviour={display?.filterBehaviourOverride ??
+                    col.filterBehaviour ??
+                    detectSqlFilterBehaviour(col.dataType)}
                   filter={display.getFilter(col.uniqueName)}
                   setFilter={value => display.setFilter(col.uniqueName, value)}
                   showResizeSplitter
@@ -1467,6 +1994,7 @@
                   onFocusGrid={() => {
                     selectTopmostCell(col.uniqueName);
                   }}
+                  dataType={col.dataType}
                 />
               </td>
             {/each}
@@ -1487,16 +2015,36 @@
             {isDynamicStructure}
             selectedCells={filterCellsForRow(selectedCells, rowIndex)}
             autofillMarkerCell={filterCellForRow(autofillMarkerCell, rowIndex)}
-            focusedColumn={display.focusedColumn}
+            focusedColumns={display.focusedColumns}
             inplaceEditorState={$inplaceEditorState}
             currentCellColumn={currentCell && currentCell[0] == rowIndex ? currentCell[1] : null}
             {dispatchInsplaceEditor}
             {frameSelection}
             onSetFormView={formViewAvailable && display?.baseTable?.primaryKey ? handleSetFormView : null}
+            {dataEditorTypesBehaviourOverride}
+            {gridColoringMode}
           />
         {/each}
       </tbody>
     </table>
+
+    {#if !isDynamicStructure && isLoadedAll && grider?.rowCount == 0}
+      <div class="no-rows-info ml-2">
+        <div class="mb-3">
+          <ErrorInfo alignTop message="No rows loaded" icon="img info" />
+        </div>
+        {#if display.filterCount > 0}
+          <FormStyledButton value="Reset filter" on:click={() => display.clearFilters()} />
+        {/if}
+        {#if grider.editable}
+          <FormStyledButton value="Add row" on:click={insertNewRow} />
+        {/if}
+        {#if onOpenQuery}
+          <FormStyledButton value="Open Query" on:click={onOpenQuery} />
+        {/if}
+      </div>
+    {/if}
+
     <HorizontalScrollBar
       minimum={0}
       maximum={maxScrollColumn}
@@ -1574,5 +2122,9 @@
     background-color: var(--theme-bg-2);
     right: 40px;
     bottom: 20px;
+  }
+
+  .no-rows-info {
+    margin-top: 60px;
   }
 </style>

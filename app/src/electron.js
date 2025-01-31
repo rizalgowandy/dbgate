@@ -1,10 +1,12 @@
 const electron = require('electron');
 const os = require('os');
+const fs = require('fs');
+// const unhandled = require('electron-unhandled');
+// const { openNewGitHubIssue, debugInfo } = require('electron-util');
 const { Menu, ipcMain } = require('electron');
-const { fork } = require('child_process');
 const { autoUpdater } = require('electron-updater');
-const Store = require('electron-store');
 const log = require('electron-log');
+const _cloneDeepWith = require('lodash.clonedeepwith');
 
 // Module to control application life.
 const app = electron.app;
@@ -13,118 +15,131 @@ const BrowserWindow = electron.BrowserWindow;
 
 const path = require('path');
 const url = require('url');
+const mainMenuDefinition = require('./mainMenuDefinition');
+const { isProApp } = require('./proTools');
+const updaterChannel = require('./updaterChannel');
 
-const store = new Store();
+// require('@electron/remote/main').initialize();
+
+const configRootPath = path.join(app.getPath('userData'), 'config-root.json');
+let saveConfigOnExit = true;
+let initialConfig = {};
+let apiLoaded = false;
+let mainModule;
+// let getLogger;
+// let loadLogsContent;
+let appUpdateStatus = '';
+let settingsJson = {};
+
+process.on('uncaughtException', function (error) {
+  console.error('uncaughtException', error);
+});
+
+const isMac = () => os.platform() == 'darwin';
+
+// unhandled({
+//   showDialog: true,
+//   reportButton: error => {
+//     openNewGitHubIssue({
+//       user: 'dbgate',
+//       repo: 'dbgate',
+//       body: `PLEASE DELETE SENSITIVE INFO BEFORE POSTING ISSUE!!!\n\n\`\`\`\n${
+//         error.stack
+//       }\n\`\`\`\n\n---\n\n${debugInfo()}\n\n\`\`\`\n${loadLogsContent ? loadLogsContent(50) : ''}\n\`\`\``,
+//     });
+//   },
+//   logger: error => (getLogger ? getLogger('electron').fatal(error) : console.error(error)),
+// });
+
+try {
+  initialConfig = JSON.parse(fs.readFileSync(configRootPath, { encoding: 'utf-8' }));
+} catch (err) {
+  console.log('Error loading config-root:', err.message);
+  initialConfig = {};
+}
 
 // Keep a global reference of the window object, if you don't, the window will
 // be closed automatically when the JavaScript object is garbage collected.
 let mainWindow;
 let mainMenu;
+let runCommandOnLoad = null;
 
 log.transports.file.level = 'debug';
 autoUpdater.logger = log;
+if (updaterChannel) {
+  autoUpdater.channel = updaterChannel;
+  autoUpdater.allowPrerelease = updaterChannel.includes('beta');
+}
 // TODO - create settings for this
 // appUpdater.channel = 'beta';
 
 let commands = {};
 
-function commandItem(id) {
+function formatKeyText(keyText) {
+  if (!keyText) {
+    return keyText;
+  }
+  if (os.platform() == 'darwin') {
+    return keyText.replace('CtrlOrCommand+', 'Command+');
+  }
+  return keyText.replace('CtrlOrCommand+', 'Ctrl+');
+}
+
+function commandItem(item) {
+  const id = item.command;
   const command = commands[id];
+  if (item.skipInApp) {
+    return { skip: true };
+  }
   return {
     id,
     label: command ? command.menuName || command.toolbarName || command.name : id,
-    accelerator: command ? command.keyText : undefined,
+    accelerator: formatKeyText(command ? command.keyText : undefined),
     enabled: command ? command.enabled : false,
     click() {
-      mainWindow.webContents.executeJavaScript(`dbgate_runCommand('${id}')`);
+      if (mainWindow) {
+        mainWindow.webContents.send('run-command', id);
+      } else {
+        runCommandOnLoad = id;
+        createWindow();
+      }
     },
   };
 }
 
 function buildMenu() {
-  const template = [
-    {
-      label: 'File',
-      submenu: [
-        commandItem('new.connection'),
-        commandItem('new.sqliteDatabase'),
-        commandItem('new.modelCompare'),
-        commandItem('new.freetable'),        
-        { type: 'separator' },
-        commandItem('file.open'),
-        commandItem('file.openArchive'),
-        { type: 'separator' },
-        commandItem('group.save'),
-        commandItem('group.saveAs'),
-        commandItem('database.search'),
-        { type: 'separator' },
-        commandItem('tabs.closeTab'),
-        commandItem('file.exit'),
-      ],
-    },
-    {
-      label: 'Window',
-      submenu: [commandItem('new.query'), { type: 'separator' }, commandItem('tabs.closeAll'), { role: 'minimize' }],
-    },
+  let template = _cloneDeepWith(mainMenuDefinition({ editMenu: true, isMac: isMac() }), item => {
+    if (item.divider) {
+      return { type: 'separator' };
+    }
 
-    // {
-    //   label: 'Edit',
-    //   submenu: [
-    //     { role: 'undo' },
-    //     { role: 'redo' },
-    //     { type: 'separator' },
-    //     { role: 'cut' },
-    //     { role: 'copy' },
-    //     { role: 'paste' },
-    //   ],
-    // },
-    {
-      label: 'View',
-      submenu: [
-        { role: 'reload' },
-        { role: 'forcereload' },
-        { role: 'toggledevtools' },
-        { type: 'separator' },
-        { role: 'resetzoom' },
-        { role: 'zoomin' },
-        { role: 'zoomout' },
-        { type: 'separator' },
-        { role: 'togglefullscreen' },
-        commandItem('theme.changeTheme'),
-      ],
-    },
-    {
-      role: 'help',
-      submenu: [
-        {
-          label: 'dbgate.org',
-          click() {
-            require('electron').shell.openExternal('https://dbgate.org');
-          },
-        },
-        {
-          label: 'DbGate on GitHub',
-          click() {
-            require('electron').shell.openExternal('https://github.com/dbgate/dbgate');
-          },
-        },
-        {
-          label: 'DbGate on docker hub',
-          click() {
-            require('electron').shell.openExternal('https://hub.docker.com/r/dbgate/dbgate');
-          },
-        },
-        {
-          label: 'Report problem or feature request',
-          click() {
-            require('electron').shell.openExternal('https://github.com/dbgate/dbgate/issues/new');
-          },
-        },
-        commandItem('tabs.changelog'),
-        commandItem('about.show'),
-      ],
-    },
-  ];
+    if (item.command) {
+      return commandItem(item);
+    }
+  });
+
+  template = _cloneDeepWith(template, item => {
+    if (Array.isArray(item) && item.find(x => x.skip)) {
+      return item.filter(x => x && !x.skip);
+    }
+  });
+
+  if (isMac()) {
+    template = [
+      {
+        label: 'DbGate',
+        submenu: [
+          commandItem({ command: 'about.show' }),
+          { role: 'services' },
+          { role: 'hide' },
+          { role: 'hideOthers' },
+          { role: 'unhide' },
+          { role: 'quit' },
+        ],
+      },
+      ...template,
+    ];
+  }
 
   return Menu.buildFromTemplate(template);
 }
@@ -139,30 +154,224 @@ ipcMain.on('update-commands', async (event, arg) => {
     // rebuild menu
     if (menu.label != command.text || menu.accelerator != command.keyText) {
       mainMenu = buildMenu();
-      mainWindow.setMenu(mainMenu);
+
+      Menu.setApplicationMenu(mainMenu);
+      // mainWindow.setMenu(mainMenu);
       return;
     }
 
     menu.enabled = command.enabled;
   }
 });
+ipcMain.on('quit-app', async (event, arg) => {
+  if (isMac()) {
+    app.quit();
+  } else {
+    mainWindow.close();
+  }
+});
+ipcMain.on('reset-settings', async (event, arg) => {
+  try {
+    saveConfigOnExit = false;
+    fs.unlinkSync(configRootPath);
+    console.log('Deleted file:', configRootPath);
+  } catch (err) {
+    console.log('Error deleting config-root:', err.message);
+  }
+
+  if (isMac()) {
+    app.quit();
+  } else {
+    mainWindow.close();
+  }
+});
+ipcMain.on('set-title', async (event, arg) => {
+  mainWindow.setTitle(arg);
+});
+ipcMain.on('open-link', async (event, arg) => {
+  electron.shell.openExternal(arg);
+});
+ipcMain.on('open-dev-tools', () => {
+  mainWindow.webContents.openDevTools();
+});
+ipcMain.on('app-started', async (event, arg) => {
+  if (runCommandOnLoad) {
+    mainWindow.webContents.send('run-command', runCommandOnLoad);
+    runCommandOnLoad = null;
+  }
+
+  if (initialConfig['winIsMaximized']) {
+    mainWindow.webContents.send('setIsMaximized', true);
+  }
+  if (autoUpdater.isUpdaterActive()) {
+    mainWindow.webContents.send('setAppUpdaterActive');
+  }
+  if (!process.env.DEVMODE) {
+    if (settingsJson['app.autoUpdateMode'] != 'skip') {
+      autoUpdater.autoDownload = settingsJson['app.autoUpdateMode'] == 'download';
+      autoUpdater.checkForUpdates();
+    }
+  }
+});
+ipcMain.on('window-action', async (event, arg) => {
+  if (!mainWindow) {
+    return;
+  }
+  switch (arg) {
+    case 'minimize':
+      mainWindow.minimize();
+      break;
+    case 'maximize':
+      mainWindow.isMaximized() ? mainWindow.unmaximize() : mainWindow.maximize();
+      break;
+    case 'close':
+      mainWindow.close();
+      break;
+    case 'fullscreen-on':
+      mainWindow.setFullScreen(true);
+      break;
+    case 'fullscreen-off':
+      mainWindow.setFullScreen(false);
+      break;
+    case 'devtools':
+      mainWindow.webContents.toggleDevTools();
+      break;
+    case 'reload':
+      mainWindow.webContents.reloadIgnoringCache();
+      break;
+    case 'zoomin':
+      mainWindow.webContents.zoomLevel += 0.5;
+      break;
+    case 'zoomout':
+      mainWindow.webContents.zoomLevel -= 0.5;
+      break;
+    case 'zoomreset':
+      mainWindow.webContents.zoomLevel = 0;
+      break;
+
+    // edit
+    case 'undo':
+      mainWindow.webContents.undo();
+      break;
+    case 'redo':
+      mainWindow.webContents.redo();
+      break;
+    case 'cut':
+      mainWindow.webContents.cut();
+      break;
+    case 'copy':
+      mainWindow.webContents.copy();
+      break;
+    case 'paste':
+      mainWindow.webContents.paste();
+      break;
+    case 'selectAll':
+      mainWindow.webContents.selectAll();
+      break;
+  }
+});
+
+ipcMain.handle('showOpenDialog', async (event, options) => {
+  const res = electron.dialog.showOpenDialogSync(mainWindow, options);
+  return res;
+});
+ipcMain.handle('showSaveDialog', async (event, options) => {
+  const res = electron.dialog.showSaveDialogSync(mainWindow, options);
+  return res;
+});
+ipcMain.handle('showItemInFolder', async (event, path) => {
+  electron.shell.showItemInFolder(path);
+});
+ipcMain.handle('openExternal', async (event, url) => {
+  electron.shell.openExternal(url);
+});
+ipcMain.on('downloadUpdate', async (event, url) => {
+  autoUpdater.downloadUpdate();
+  changeAppUpdateStatus({
+    icon: 'icon loading',
+    message: `Downloading update...`,
+  });
+});
+ipcMain.on('applyUpdate', async (event, url) => {
+  autoUpdater.quitAndInstall(false, true);
+});
+ipcMain.on('check-for-updates', async (event, url) => {
+  autoUpdater.autoDownload = false;
+  autoUpdater.checkForUpdates();
+});
+
+function fillMissingSettings(value) {
+  const res = {
+    ...value,
+  };
+  if (value['app.useNativeMenu'] !== true && value['app.useNativeMenu'] !== false) {
+    res['app.useNativeMenu'] = false;
+    // res['app.useNativeMenu'] = os.platform() == 'darwin' ? true : false;
+  }
+  return res;
+}
+
+function ensureBoundsVisible(bounds) {
+  const area = electron.screen.getDisplayMatching(bounds).workArea;
+
+  let { x, y, width, height } = bounds;
+
+  const isWithinDisplay =
+    x >= area.x && x + width <= area.x + area.width && y >= area.y && y + height <= area.y + area.height;
+
+  if (!isWithinDisplay) {
+    width = Math.min(width, area.width);
+    height = Math.min(height, area.height);
+
+    if (width < 400) width = 400;
+    if (height < 300) height = 300;
+
+    x = area.x; // + Math.round(area.width - width / 2);
+    y = area.y; // + Math.round(area.height - height / 2);
+  }
+
+  return { x, y, width, height };
+}
 
 function createWindow() {
-  const bounds = store.get('winBounds');
+  const datadir = path.join(os.homedir(), '.dbgate');
+
+  try {
+    settingsJson = fillMissingSettings(
+      JSON.parse(fs.readFileSync(path.join(datadir, 'settings.json'), { encoding: 'utf-8' }))
+    );
+  } catch (err) {
+    console.log('Error loading settings.json:', err.message);
+    settingsJson = fillMissingSettings({});
+  }
+
+  let bounds = initialConfig['winBounds'];
+  if (bounds) {
+    bounds = ensureBoundsVisible(bounds);
+  }
+  useNativeMenu = settingsJson['app.useNativeMenu'];
 
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
-    title: 'DbGate',
+    title: isProApp() ? 'DbGate Premium' : 'DbGate',
+    frame: useNativeMenu,
+    titleBarStyle: useNativeMenu ? undefined : 'hidden',
     ...bounds,
     icon: os.platform() == 'win32' ? 'icon.ico' : path.resolve(__dirname, '../icon.png'),
+    partition: isProApp() ? 'persist:dbgate-premium' : 'persist:dbgate',
     webPreferences: {
       nodeIntegration: true,
-      enableRemoteModule: true,
+      contextIsolation: false,
+      spellcheck: false,
     },
   });
-  if (store.get('winIsMaximized')) {
+
+  if (initialConfig['winIsMaximized']) {
     mainWindow.maximize();
+  }
+  if (settingsJson['app.fullscreen']) {
+    mainWindow.setFullScreen(true);
   }
 
   mainMenu = buildMenu();
@@ -176,44 +385,71 @@ function createWindow() {
         protocol: 'file:',
         slashes: true,
       });
-    mainWindow.webContents.on('did-finish-load', function () {
-      // hideSplash();
-    });
     mainWindow.on('close', () => {
-      store.set('winBounds', mainWindow.getBounds());
-      store.set('winIsMaximized', mainWindow.isMaximized());
+      try {
+        if (saveConfigOnExit) {
+          fs.writeFileSync(
+            configRootPath,
+            JSON.stringify({
+              winBounds: mainWindow.getBounds(),
+              winIsMaximized: mainWindow.isMaximized(),
+            }),
+            'utf-8'
+          );
+        }
+      } catch (err) {
+        console.log('Error saving config-root:', err.message);
+      }
     });
+
+    // mainWindow.webContents.toggleDevTools();
+
     mainWindow.loadURL(startUrl);
     if (os.platform() == 'linux') {
       mainWindow.setIcon(path.resolve(__dirname, '../icon.png'));
     }
-  }
 
-  if (process.env.ELECTRON_START_URL) {
-    loadMainWindow();
-  } else {
-    const apiProcess = fork(path.join(__dirname, '../packages/api/dist/bundle.js'), [
-      '--dynport',
-      '--is-electron-bundle',
-      '--native-modules',
-      path.join(__dirname, 'nativeModules'),
-      // '../../../src/nativeModules'
-    ]);
-    apiProcess.on('message', msg => {
-      if (msg.msgtype == 'listening') {
-        const { port, authorization } = msg;
-        global['port'] = port;
-        global['authorization'] = authorization;
-        loadMainWindow();
-      }
+    mainWindow.on('maximize', () => {
+      mainWindow.webContents.send('setIsMaximized', true);
     });
+
+    mainWindow.on('unmaximize', () => {
+      mainWindow.webContents.send('setIsMaximized', false);
+    });
+
+    // app.on('browser-window-focus', () => {
+    //   const bounds = ensureBoundsVisible(mainWindow.getBounds());
+    //   mainWindow.setBounds(bounds);
+    // });
   }
 
-  // and load the index.html of the app.
-  // mainWindow.loadURL('http://localhost:3000');
+  if (!apiLoaded) {
+    const apiPackage = path.join(
+      __dirname,
+      process.env.DEVMODE ? '../../packages/api/src/index' : '../packages/api/dist/bundle.js'
+    );
 
-  // Open the DevTools.
-  // mainWindow.webContents.openDevTools();
+    global.API_PACKAGE = apiPackage;
+
+    // console.log('global.API_PACKAGE', global.API_PACKAGE);
+    const api = require(apiPackage);
+    // console.log(
+    //   'REQUIRED',
+    //   path.resolve(
+    //     path.join(__dirname, process.env.DEVMODE ? '../../packages/api/src/index' : '../packages/api/dist/bundle.js')
+    //   )
+    // );
+    api.configureLogger();
+    const main = api.getMainModule();
+    main.useAllControllers(null, electron);
+    mainModule = main;
+    // getLogger = api.getLogger;
+    // loadLogsContent = api.loadLogsContent;
+    apiLoaded = true;
+  }
+  mainModule.setElectronSender(mainWindow.webContents);
+
+  loadMainWindow();
 
   // Emitted when the window is closed.
   mainWindow.on('closed', function () {
@@ -221,11 +457,65 @@ function createWindow() {
     // in an array if your app supports multi windows, this is the time
     // when you should delete the corresponding element.
     mainWindow = null;
+    mainModule.setElectronSender(null);
   });
 }
 
+function changeAppUpdateStatus(status) {
+  appUpdateStatus = status;
+  mainWindow.webContents.send('app-update-status', appUpdateStatus);
+}
+
+autoUpdater.on('checking-for-update', () => {
+  console.log('Checking for updates');
+  changeAppUpdateStatus({
+    icon: 'icon loading',
+    message: 'Checking for updates...',
+  });
+});
+
+autoUpdater.on('update-available', info => {
+  console.log('Update available', info);
+  if (autoUpdater.autoDownload) {
+    changeAppUpdateStatus({
+      icon: 'icon loading',
+      message: `Downloading update...`,
+    });
+  } else {
+    mainWindow.webContents.send('update-available', info.version);
+    changeAppUpdateStatus({
+      icon: 'icon download',
+      message: `Update available`,
+    });
+  }
+});
+
+autoUpdater.on('update-not-available', info => {
+  console.log('Update not available', info);
+  changeAppUpdateStatus({
+    icon: 'icon check',
+    message: `No new updates`,
+  });
+});
+
+autoUpdater.on('update-downloaded', info => {
+  console.log('Update downloaded from', info);
+  changeAppUpdateStatus({
+    icon: 'icon download',
+    message: `Downloaded ${info.version}`,
+  });
+  mainWindow.webContents.send('downloaded-new-version', info.version);
+});
+
+autoUpdater.on('error', error => {
+  changeAppUpdateStatus({
+    icon: 'icon error',
+    message: `Autoupdate error`,
+  });
+  console.error('Update error', error);
+});
+
 function onAppReady() {
-  autoUpdater.checkForUpdatesAndNotify();
   createWindow();
 }
 
@@ -238,7 +528,7 @@ app.on('ready', onAppReady);
 app.on('window-all-closed', function () {
   // On OS X it is common for applications and their menu bar
   // to stay active until the user quits explicitly with Cmd + Q
-  if (process.platform !== 'darwin') {
+  if (!isMac()) {
     app.quit();
   }
 });

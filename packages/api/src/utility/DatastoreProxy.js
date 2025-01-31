@@ -1,6 +1,10 @@
+const crypto = require('crypto');
 const { fork } = require('child_process');
-const uuidv1 = require('uuid/v1');
 const { handleProcessCommunication } = require('./processComm');
+const processArgs = require('../utility/processArgs');
+const pipeForkLogs = require('./pipeForkLogs');
+const { getLogger, extractErrorLogData } = require('dbgate-tools');
+const logger = getLogger('DatastoreProxy');
 
 class DatastoreProxy {
   constructor(file) {
@@ -29,7 +33,20 @@ class DatastoreProxy {
 
   async ensureSubprocess() {
     if (!this.subprocess) {
-      this.subprocess = fork(process.argv[1], ['--start-process', 'jslDatastoreProcess', ...process.argv.slice(3)]);
+      this.subprocess = fork(
+        global['API_PACKAGE'] || process.argv[1],
+        [
+          '--is-forked-api',
+          '--start-process',
+          'jslDatastoreProcess',
+          ...processArgs.getPassArgs(),
+          // ...process.argv.slice(3),
+        ],
+        {
+          stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+        }
+      );
+      pipeForkLogs(this.subprocess);
 
       this.subprocess.on('message', message => {
         // @ts-ignore
@@ -50,19 +67,29 @@ class DatastoreProxy {
 
   async getRows(offset, limit) {
     await this.ensureSubprocess();
-    const msgid = uuidv1();
+    const msgid = crypto.randomUUID();
     const promise = new Promise((resolve, reject) => {
       this.requests[msgid] = [resolve, reject];
-      this.subprocess.send({ msgtype: 'read', msgid, offset, limit });
+      try {
+        this.subprocess.send({ msgtype: 'read', msgid, offset, limit });
+      } catch (err) {
+        logger.error(extractErrorLogData(err), 'Error getting rows');
+        this.subprocess = null;
+      }
     });
     return promise;
   }
 
   async notifyChangedCore() {
-    const msgid = uuidv1();
+    const msgid = crypto.randomUUID();
     const promise = new Promise((resolve, reject) => {
       this.requests[msgid] = [resolve, reject];
-      this.subprocess.send({ msgtype: 'notify', msgid });
+      try {
+        this.subprocess.send({ msgtype: 'notify', msgid });
+      } catch (err) {
+        logger.error(extractErrorLogData(err), 'Error notifying subprocess');
+        this.subprocess = null;
+      }
     });
     return promise;
   }

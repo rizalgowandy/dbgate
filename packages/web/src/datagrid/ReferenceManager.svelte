@@ -2,15 +2,14 @@
   import { GridDisplay } from 'dbgate-datalib';
   import { filterName } from 'dbgate-tools';
   import { createEventDispatcher } from 'svelte';
-import CloseSearchButton from '../elements/CloseSearchButton.svelte';
+  import CloseSearchButton from '../buttons/CloseSearchButton.svelte';
 
-  import InlineButton from '../elements/InlineButton.svelte';
   import ManagerInnerContainer from '../elements/ManagerInnerContainer.svelte';
 
   import SearchBoxWrapper from '../elements/SearchBoxWrapper.svelte';
   import SearchInput from '../elements/SearchInput.svelte';
   import FontIcon from '../icons/FontIcon.svelte';
-  import ColumnManagerRow from './ColumnManagerRow.svelte';
+  import TokenizedFilteredText from '../widgets/TokenizedFilteredText.svelte';
 
   export let managerSize;
   export let display: GridDisplay;
@@ -22,7 +21,6 @@ import CloseSearchButton from '../elements/CloseSearchButton.svelte';
 
   $: foreignKeys = display?.baseTable?.foreignKeys || [];
   $: dependencies = display?.baseTable?.dependencies || [];
-
 </script>
 
 <SearchBoxWrapper>
@@ -47,7 +45,7 @@ import CloseSearchButton from '../elements/CloseSearchButton.svelte';
       >
         <FontIcon icon="img link" />
         <div class="ml-1 nowrap">
-          {fk.refTableName}
+          <TokenizedFilteredText text={fk.refTableName} {filter} />
           ({fk.columns.map(x => x.columnName).join(', ')})
         </div>
       </div>
@@ -71,7 +69,7 @@ import CloseSearchButton from '../elements/CloseSearchButton.svelte';
       >
         <FontIcon icon="img reference" />
         <div class="ml-1 nowrap">
-          {fk.pureName}
+          <TokenizedFilteredText text={fk.pureName} {filter} />
           ({fk.columns.map(x => x.columnName).join(', ')})
         </div>
       </div>
@@ -90,5 +88,4 @@ import CloseSearchButton from '../elements/CloseSearchButton.svelte';
   .link:hover {
     text-decoration: underline;
   }
-
 </style>

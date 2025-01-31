@@ -1,25 +1,25 @@
 <script lang="ts">
-  import getElectron from '../utility/getElectron';
+  import contextMenu from '../utility/contextMenu';
+  import { internalRedirectTo } from '../clientAuth';
+  import { openWebLink } from '../utility/simpleTools';
 
   export let href = undefined;
   export let onClick = undefined;
-
-  const electron = getElectron();
+  export let menu = '__no_menu';
+  export let internalRedirect = undefined;
 </script>
 
-{#if onClick}
-  <a on:click={onClick}>
-    <slot />
-  </a>
-{:else if electron}
-  <a on:click={() => electron.shell.openExternal(href)}>
-    <slot />
-  </a>
-{:else}
-  <a {href} target="_blank" rel="noopener noreferrer">
-    <slot />
-  </a>
-{/if}
+<a
+  on:click={e => {
+    if (onClick) onClick(e);
+    else if (internalRedirect) internalRedirectTo(internalRedirect);
+    else openWebLink(href);
+  }}
+  use:contextMenu={menu}
+  {...$$restProps}
+>
+  <slot />
+</a>
 
 <style>
   a {

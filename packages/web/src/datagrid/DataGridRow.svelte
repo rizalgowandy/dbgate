@@ -17,7 +17,7 @@
   export let selectedCells = undefined;
   export let autofillSelectedCells = undefined;
   export let autofillMarkerCell = undefined;
-  export let focusedColumn = undefined;
+  export let focusedColumns = undefined;
   export let inplaceEditorState;
   export let dispatchInsplaceEditor;
   export let onSetFormView;
@@ -26,6 +26,9 @@
   export let conid;
   export let database;
   export let driver;
+  export let gridColoringMode = '36';
+
+  export let dataEditorTypesBehaviourOverride = null;
 
   $: rowData = grider.getRowData(rowIndex);
   $: rowStatus = grider.getRowStatus(rowIndex);
@@ -50,19 +53,21 @@
   }
 </script>
 
-<tr style={`height: ${rowHeight}px`}>
+<tr style={`height: ${rowHeight}px`} class={`coloring-mode-${gridColoringMode}`}>
   <RowHeaderCell {rowIndex} onShowForm={onSetFormView ? () => onSetFormView(rowData, null) : null} />
   {#each visibleRealColumns as col (col.uniqueName)}
     {#if inplaceEditorState.cell && rowIndex == inplaceEditorState.cell[0] && col.colIndex == inplaceEditorState.cell[1]}
-      <td>
-        <InplaceEditor
-          width={col.width}
-          {inplaceEditorState}
-          {dispatchInsplaceEditor}
-          cellValue={rowData[col.uniqueName]}
-          onSetValue={value => grider.setCellValue(rowIndex, col.uniqueName, value)}
-        />
-      </td>
+      <InplaceEditor
+        width={col.width}
+        {inplaceEditorState}
+        {dispatchInsplaceEditor}
+        cellValue={rowData[col.uniqueName]}
+        options={col.options}
+        canSelectMultipleOptions={col.canSelectMultipleOptions}
+        onSetValue={value => grider.setCellValue(rowIndex, col.uniqueName, value)}
+        {driver}
+        {dataEditorTypesBehaviourOverride}
+      />
     {:else}
       <DataGridCell
         {rowIndex}
@@ -70,12 +75,13 @@
         {col}
         {conid}
         {database}
+        editorTypes={dataEditorTypesBehaviourOverride ?? driver?.dataEditorTypesBehaviour}
         allowHintField={hintFieldsAllowed?.includes(col.uniqueName)}
         isSelected={frameSelection ? false : cellIsSelected(rowIndex, col.colIndex, selectedCells)}
         isCurrentCell={col.colIndex == currentCellColumn}
         isFrameSelected={frameSelection ? cellIsSelected(rowIndex, col.colIndex, selectedCells) : false}
         isAutofillSelected={cellIsSelected(rowIndex, col.colIndex, autofillSelectedCells)}
-        isFocusedColumn={col.uniqueName == focusedColumn}
+        isFocusedColumn={focusedColumns?.includes(col.uniqueName)}
         isModifiedCell={rowStatus.modifiedFields && rowStatus.modifiedFields.has(col.uniqueName)}
         isModifiedRow={rowStatus.status == 'updated'}
         isInserted={rowStatus.status == 'inserted' ||
@@ -89,6 +95,8 @@
           autofillMarkerCell[0] == rowIndex &&
           grider.editable}
         onDictionaryLookup={() => handleLookup(col)}
+        onSetValue={value => grider.setCellValue(rowIndex, col.uniqueName, value)}
+        isReadonly={!grider.editable}
       />
     {/if}
   {/each}
@@ -98,10 +106,19 @@
   tr {
     background-color: var(--theme-bg-0);
   }
-  tr:nth-child(6n + 3) {
+
+  tr.coloring-mode-36:nth-child(6n + 3) {
     background-color: var(--theme-bg-1);
   }
-  tr:nth-child(6n + 6) {
+  tr.coloring-mode-36:nth-child(6n + 6) {
+    background-color: var(--theme-bg-alt);
+  }
+
+  tr.coloring-mode-2-primary:nth-child(2n + 1) {
+    background-color: var(--theme-bg-1);
+  }
+
+  tr.coloring-mode-2-secondary:nth-child(2n + 1) {
     background-color: var(--theme-bg-alt);
   }
 </style>

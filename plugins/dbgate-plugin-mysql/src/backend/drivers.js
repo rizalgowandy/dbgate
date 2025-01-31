@@ -3,7 +3,13 @@ const stream = require('stream');
 const driverBases = require('../frontend/drivers');
 const Analyser = require('./Analyser');
 const mysql2 = require('mysql2');
-const { createBulkInsertStreamBase, makeUniqueColumnNames } = require('dbgate-tools');
+const { getLogger, createBulkInsertStreamBase, makeUniqueColumnNames, extractErrorLogData } =
+  global.DBGATE_PACKAGES['dbgate-tools'];
+const { MySqlDumper } = require('antares-mysql-dumper');
+
+const logger = getLogger('mysqlDriver');
+
+let authProxy;
 
 function extractColumns(fields) {
   if (fields) {
@@ -28,28 +34,45 @@ const drivers = driverBases.map(driverBase => ({
   ...driverBase,
   analyserClass: Analyser,
 
-  async connect({ server, port, user, password, database, ssl }) {
-    const connection = mysql2.createConnection({
-      host: server,
-      port,
+  async connect(props) {
+    const { server, port, user, password, database, ssl, isReadOnly, forceRowsAsObjects, socketPath, authType } = props;
+    let awsIamToken = null;
+    if (authType == 'awsIam') {
+      awsIamToken = await authProxy.getAwsIamToken(props);
+    }
+
+    const options = {
+      host: authType == 'socket' ? null : server,
+      port: authType == 'socket' ? null : port,
+      socketPath: authType == 'socket' ? socketPath || driverBase.defaultSocketPath : null,
       user,
-      password,
+      password: awsIamToken || password,
       database,
-      ssl,
-      rowsAsArray: true,
+      ssl: authType == 'awsIam' ? ssl || { rejectUnauthorized: false } : ssl,
+      rowsAsArray: forceRowsAsObjects ? false : true,
       supportBigNumbers: true,
       bigNumberStrings: true,
       dateStrings: true,
       // TODO: test following options
       // multipleStatements: true,
+    };
+
+    const client = mysql2.createConnection(options);
+    const dbhan = {
+      client,
+      database,
+    };
+    if (isReadOnly) {
+      await this.query(dbhan, 'SET SESSION TRANSACTION READ ONLY');
+    }
+    return dbhan;
+  },
+  close(dbhan) {
+    return new Promise(resolve => {
+      dbhan.client.end(resolve);
     });
-    connection._database_name = database;
-    return connection;
   },
-  async close(pool) {
-    return pool.close();
-  },
-  query(connection, sql) {
+  query(dbhan, sql, options) {
     if (sql == null) {
       return {
         rows: [],
@@ -57,16 +80,28 @@ const drivers = driverBases.map(driverBase => ({
       };
     }
 
+    if (
+      options?.importSqlDump &&
+      (sql.trim().startsWith('/*!') || sql.trim().startsWith('/*M!')) &&
+      (sql.includes('character_set_client') || sql.includes('NOTE_VERBOSITY'))
+    ) {
+      // skip this in SQL dumps
+      return {
+        rows: [],
+        columns: [],
+      };
+    }
+
     return new Promise((resolve, reject) => {
-      connection.query(sql, function (error, results, fields) {
+      dbhan.client.query(sql, function (error, results, fields) {
         if (error) reject(error);
         const columns = extractColumns(fields);
         resolve({ rows: results && columns && results.map && results.map(row => zipDataRow(row, columns)), columns });
       });
     });
   },
-  async stream(connection, sql, options) {
-    const query = connection.query(sql);
+  async stream(dbhan, sql, options) {
+    const query = dbhan.client.query(sql);
     let columns = [];
 
     // const handleInfo = (info) => {
@@ -85,7 +120,7 @@ const drivers = driverBases.map(driverBase => ({
     };
 
     const handleRow = row => {
-      if (row && row.constructor && row.constructor.name == 'OkPacket') {
+      if (row && row.constructor && (row.constructor.name == 'OkPacket' || row.constructor.name == 'ResultSetHeader')) {
         options.info({
           message: `${row.affectedRows} rows affected`,
           time: new Date(),
@@ -104,12 +139,11 @@ const drivers = driverBases.map(driverBase => ({
     };
 
     const handleError = error => {
-      console.log('ERROR', error);
-      const { message, lineNumber, procName } = error;
+      logger.error(extractErrorLogData(error), 'Stream error');
+      const { message } = error;
       options.info({
         message,
-        line: lineNumber,
-        procedure: procName,
+        line: 0,
         time: new Date(),
         severity: 'error',
       });
@@ -117,8 +151,8 @@ const drivers = driverBases.map(driverBase => ({
 
     query.on('error', handleError).on('fields', handleFields).on('result', handleRow).on('end', handleEnd);
   },
-  async readQuery(connection, sql, structure) {
-    const query = connection.query(sql);
+  async readQuery(dbhan, sql, structure) {
+    const query = dbhan.client.query(sql);
 
     const pass = new stream.PassThrough({
       objectMode: true,
@@ -143,8 +177,8 @@ const drivers = driverBases.map(driverBase => ({
 
     return pass;
   },
-  async getVersion(connection) {
-    const { rows } = await this.query(connection, "show variables like 'version'");
+  async getVersion(dbhan) {
+    const { rows } = await this.query(dbhan, "show variables like 'version'");
     const version = rows[0].Value;
     if (version) {
       const m = version.match(/(.*)-MariaDB-/);
@@ -161,14 +195,48 @@ const drivers = driverBases.map(driverBase => ({
       versionText: `MySQL ${version}`,
     };
   },
-  async listDatabases(connection) {
-    const { rows } = await this.query(connection, 'show databases');
+  async listDatabases(dbhan) {
+    const { rows } = await this.query(dbhan, 'show databases');
     return rows.map(x => ({ name: x.Database }));
   },
-  async writeTable(pool, name, options) {
+  async writeTable(dbhan, name, options) {
     // @ts-ignore
-    return createBulkInsertStreamBase(this, stream, pool, name, options);
+    return createBulkInsertStreamBase(this, stream, dbhan, name, options);
+  },
+  async createBackupDumper(dbhan, options) {
+    const { outputFile, databaseName, schemaName } = options;
+    const res = new MySqlDumper({
+      connection: dbhan.client,
+      schema: databaseName || schemaName,
+      outputFile,
+    });
+    return res;
+  },
+  getAuthTypes() {
+    const res = [
+      {
+        title: 'Host and port',
+        name: 'hostPort',
+        disabledFields: ['socketPath'],
+      },
+      {
+        title: 'Socket',
+        name: 'socket',
+        disabledFields: ['server', 'port'],
+      },
+    ];
+    if (authProxy.supportsAwsIam()) {
+      res.push({
+        title: 'AWS IAM',
+        name: 'awsIam',
+      });
+    }
+    return res;
   },
 }));
+
+drivers.initialize = dbgateEnv => {
+  authProxy = dbgateEnv.authProxy;
+};
 
 module.exports = drivers;

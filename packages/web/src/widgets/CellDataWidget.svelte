@@ -1,4 +1,6 @@
 <script lang="ts" context="module">
+  import { isWktGeometry } from 'dbgate-tools';
+
   const formats = [
     {
       type: 'textWrap',
@@ -24,12 +26,35 @@
       component: JsonRowView,
       single: false,
     },
+    {
+      type: 'picture',
+      title: 'Picture',
+      component: PictureCellView,
+      single: true,
+    },
+    {
+      type: 'html',
+      title: 'HTML',
+      component: HtmlCellView,
+      single: false,
+    },
+    {
+      type: 'map',
+      title: 'Map',
+      component: MapCellView,
+      single: false,
+    },
   ];
 
   function autodetect(selection) {
-    if (selection[0]?.engine?.dialect?.nosql) {
+    if (selectionCouldBeShownOnMap(selection)) {
+      return 'map';
+    }
+
+    if (selection[0]?.engine?.databaseEngineTypes?.includes('document')) {
       return 'jsonRow';
     }
+
     const value = selection.length == 1 ? selection[0].value : null;
     if (_.isString(value)) {
       if (value.startsWith('[') || value.startsWith('{')) return 'json';
@@ -47,13 +72,15 @@
 
 <script lang="ts">
   import _ from 'lodash';
-  import { onMount } from 'svelte';
-
+  import HtmlCellView from '../celldata/HtmlCellView.svelte';
   import JsonCellView from '../celldata/JsonCellView.svelte';
   import JsonRowView from '../celldata/JsonRowView.svelte';
+  import MapCellView from '../celldata/MapCellView.svelte';
+  import PictureCellView from '../celldata/PictureCellView.svelte';
   import TextCellViewNoWrap from '../celldata/TextCellViewNoWrap.svelte';
   import TextCellViewWrap from '../celldata/TextCellViewWrap.svelte';
   import ErrorInfo from '../elements/ErrorInfo.svelte';
+  import { selectionCouldBeShownOnMap } from '../elements/SelectionMapView.svelte';
   import SelectField from '../forms/SelectField.svelte';
   import { selectedCellsCallback } from '../stores';
   import WidgetTitle from './WidgetTitle.svelte';
@@ -124,5 +151,6 @@
   .data {
     display: flex;
     flex: 1;
+    position: relative;
   }
 </style>

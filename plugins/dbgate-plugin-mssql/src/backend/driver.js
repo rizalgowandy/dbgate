@@ -5,11 +5,15 @@ const MsSqlAnalyser = require('./MsSqlAnalyser');
 const createTediousBulkInsertStream = require('./createTediousBulkInsertStream');
 const createNativeBulkInsertStream = require('./createNativeBulkInsertStream');
 const AsyncLock = require('async-lock');
-const nativeDriver = require('./nativeDriver');
 const lock = new AsyncLock();
 const { tediousConnect, tediousQueryCore, tediousReadQuery, tediousStream } = require('./tediousDriver');
-const { nativeConnect, nativeQueryCore, nativeReadQuery, nativeStream } = nativeDriver;
-let msnodesqlv8;
+const { nativeConnect, nativeQueryCore, nativeReadQuery, nativeStream } = require('./nativeDriver');
+const { getLogger } = global.DBGATE_PACKAGES['dbgate-tools'];
+
+const logger = getLogger('mssqlDriver');
+
+let platformInfo;
+let authProxy;
 
 const versionQuery = `
 SELECT 
@@ -41,7 +45,7 @@ const windowsAuthTypes = [
     disabledFields: ['port'],
   },
   {
-    title: 'NodeJs portable driver (tedious)',
+    title: 'NodeJs portable driver (tedious) - recomended',
     name: 'tedious',
   },
 ];
@@ -52,55 +56,77 @@ const driver = {
   analyserClass: MsSqlAnalyser,
 
   getAuthTypes() {
-    return msnodesqlv8 ? windowsAuthTypes : null;
+    const res = [];
+    if (platformInfo?.isWindows) res.push(...windowsAuthTypes);
+
+    if (authProxy.isAuthProxySupported()) {
+      res.push(
+        {
+          title: 'NodeJs portable driver (tedious) - recomended',
+          name: 'tedious',
+        },
+        {
+          title: 'Microsoft Entra ID (with MFA support)',
+          name: 'msentra',
+          disabledFields: ['user', 'password'],
+        }
+      );
+    }
+    if (res.length > 0) {
+      return _.uniqBy(res, 'name');
+    }
+    return null;
   },
 
   async connect(conn) {
     const { authType } = conn;
-    if (msnodesqlv8 && (authType == 'sspi' || authType == 'sql')) {
-      return nativeConnect(conn);
-    }
+    const connectionType = platformInfo?.isWindows && (authType == 'sspi' || authType == 'sql') ? 'msnodesqlv8' : 'tedious';
+    const client = connectionType == 'msnodesqlv8' ? await nativeConnect(conn) : await tediousConnect(conn);
 
-    return tediousConnect(conn);
+    return {
+      client,
+      connectionType,
+      database: conn.database,
+    };
   },
-  async close(pool) {
-    return pool.close();
+  async close(dbhan) {
+    return dbhan.client.close();
   },
-  async queryCore(pool, sql, options) {
-    if (pool._connectionType == 'msnodesqlv8') {
-      return nativeQueryCore(pool, sql, options);
+  async queryCore(dbhan, sql, options) {
+    if (dbhan.connectionType == 'msnodesqlv8') {
+      return nativeQueryCore(dbhan, sql, options);
     } else {
-      return tediousQueryCore(pool, sql, options);
+      return tediousQueryCore(dbhan, sql, options);
     }
   },
-  async query(pool, sql, options) {
+  async query(dbhan, sql, options) {
     return lock.acquire('connection', async () => {
-      return this.queryCore(pool, sql, options);
+      return this.queryCore(dbhan, sql, options);
     });
   },
-  async stream(pool, sql, options) {
-    if (pool._connectionType == 'msnodesqlv8') {
-      return nativeStream(pool, sql, options);
+  async stream(dbhan, sql, options) {
+    if (dbhan.connectionType == 'msnodesqlv8') {
+      return nativeStream(dbhan, sql, options);
     } else {
-      return tediousStream(pool, sql, options);
+      return tediousStream(dbhan, sql, options);
     }
   },
-  async readQuery(pool, sql, structure) {
-    if (pool._connectionType == 'msnodesqlv8') {
-      return nativeReadQuery(pool, sql, structure);
+  async readQuery(dbhan, sql, structure) {
+    if (dbhan.connectionType == 'msnodesqlv8') {
+      return nativeReadQuery(dbhan, sql, structure);
     } else {
-      return tediousReadQuery(pool, sql, structure);
+      return tediousReadQuery(dbhan, sql, structure);
     }
   },
-  async writeTable(pool, name, options) {
-    if (pool._connectionType == 'msnodesqlv8') {
-      return createNativeBulkInsertStream(this, stream, pool, name, options);
+  async writeTable(dbhan, name, options) {
+    if (dbhan.connectionType == 'msnodesqlv8') {
+      return createNativeBulkInsertStream(this, stream, dbhan, name, options);
     } else {
-      return createTediousBulkInsertStream(this, stream, pool, name, options);
+      return createTediousBulkInsertStream(this, stream, dbhan, name, options);
     }
   },
-  async getVersion(pool) {
-    const res = (await this.query(pool, versionQuery)).rows[0];
+  async getVersion(dbhan) {
+    const res = (await this.query(dbhan, versionQuery)).rows[0];
 
     if (res.productVersion) {
       const splitted = res.productVersion.split('.');
@@ -111,17 +137,41 @@ const driver = {
     }
     return res;
   },
-  async listDatabases(pool) {
-    const { rows } = await this.query(pool, 'SELECT name FROM sys.databases order by name');
+  async listDatabases(dbhan) {
+    const { rows } = await this.query(dbhan, 'SELECT name FROM sys.databases order by name');
     return rows;
+  },
+  getRedirectAuthUrl(connection, options) {
+    if (connection.authType != 'msentra') return null;
+    return authProxy.authProxyGetRedirectUrl({
+      ...options,
+      type: 'msentra',
+    });
+  },
+  getAuthTokenFromCode(connection, options) {
+    return authProxy.authProxyGetTokenFromCode(options);
+  },
+  getAccessTokenFromAuth: (connection, req) => {
+    return req?.user?.msentraToken;
+  },
+  async listSchemas(dbhan) {
+    const { rows } = await this.query(dbhan, 'select schema_id as objectId, name as schemaName from sys.schemas');
+
+    const defaultSchemaRows = await this.query(dbhan, 'SELECT SCHEMA_NAME() as name');
+    const defaultSchema = defaultSchemaRows.rows[0]?.name;
+
+    logger.debug(`Loaded ${rows.length} mssql schemas`);
+
+    return rows.map(x => ({
+      ...x,
+      isDefault: x.schemaName == defaultSchema,
+    }));
   },
 };
 
 driver.initialize = dbgateEnv => {
-  if (dbgateEnv.nativeModules && dbgateEnv.nativeModules.msnodesqlv8) {
-    msnodesqlv8 = dbgateEnv.nativeModules.msnodesqlv8();
-  }
-  nativeDriver.initialize(dbgateEnv);
+  platformInfo = dbgateEnv.platformInfo;
+  authProxy = dbgateEnv.authProxy;
 };
 
 module.exports = driver;
